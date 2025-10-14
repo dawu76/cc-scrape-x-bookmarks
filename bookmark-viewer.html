@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X Bookmarks Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #15202b;
+            color: #ffffff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .stats {
+            color: #8899a6;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .chart-container {
+            background: #192734;
+            border: 1px solid #38444d;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .chart-toggle {
+            background: #1da1f2;
+            border: none;
+            color: #ffffff;
+            padding: 6px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .chart-toggle:hover {
+            background: #1a8cd8;
+        }
+
+        canvas {
+            max-height: 250px;
+        }
+
+        .terms-container {
+            background: #192734;
+            border: 1px solid #38444d;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .terms-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .terms-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .terms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .term-item {
+            background: rgba(29, 161, 242, 0.1);
+            border: 1px solid rgba(29, 161, 242, 0.3);
+            border-radius: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .term-item:hover {
+            background: rgba(29, 161, 242, 0.2);
+            border-color: rgba(29, 161, 242, 0.5);
+        }
+
+        .term-text {
+            color: #1da1f2;
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .term-count {
+            color: #8899a6;
+            font-size: 12px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+
+        .search-box {
+            background: #192734;
+            border: 1px solid #38444d;
+            border-radius: 20px;
+            padding: 12px 20px;
+            width: 100%;
+            font-size: 16px;
+            color: #ffffff;
+            margin-bottom: 20px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #1da1f2;
+        }
+
+        .filters {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            background: #192734;
+            border: 1px solid #38444d;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .filter-btn:hover {
+            background: #1c2938;
+        }
+
+        .filter-btn.active {
+            background: #1da1f2;
+            border-color: #1da1f2;
+        }
+
+        select {
+            background: #192734;
+            border: 1px solid #38444d;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .bookmark {
+            background: #192734;
+            border: 1px solid #38444d;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .bookmark:hover {
+            background: #1c2938;
+        }
+
+        .bookmark-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .display-name {
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .username {
+            color: #8899a6;
+            font-size: 15px;
+        }
+
+        .verified {
+            color: #1da1f2;
+            margin-left: 4px;
+        }
+
+        .timestamp {
+            color: #8899a6;
+            font-size: 14px;
+        }
+
+        .bookmark-text {
+            font-size: 15px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .metrics {
+            display: flex;
+            gap: 20px;
+            color: #8899a6;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .metric {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .view-tweet {
+            display: inline-block;
+            color: #1da1f2;
+            text-decoration: none;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 1px solid #1da1f2;
+            border-radius: 16px;
+            margin-top: 8px;
+        }
+
+        .view-tweet:hover {
+            background: rgba(29, 161, 242, 0.1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #8899a6;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #8899a6;
+        }
+
+        .load-more {
+            background: #1da1f2;
+            border: none;
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 24px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 700;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .load-more:hover {
+            background: #1a8cd8;
+        }
+
+        .media-preview {
+            color: #8899a6;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        .active-filters {
+            background: #192734;
+            border: 1px solid #38444d;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .active-filters.visible {
+            display: block;
+        }
+
+        .active-filters-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .active-filters-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #8899a6;
+        }
+
+        .clear-all-btn {
+            background: #e74c3c;
+            border: none;
+            color: #ffffff;
+            padding: 4px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .clear-all-btn:hover {
+            background: #c0392b;
+        }
+
+        .filter-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-chip {
+            background: rgba(29, 161, 242, 0.15);
+            border: 1px solid rgba(29, 161, 242, 0.4);
+            color: #1da1f2;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-chip-remove {
+            cursor: pointer;
+            font-weight: bold;
+            color: #1da1f2;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .filter-chip-remove:hover {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 X Bookmarks Viewer</h1>
+            <div class="stats" id="stats">Loading bookmarks...</div>
+        </header>
+
+        <input
+            type="text"
+            class="search-box"
+            id="searchInput"
+            placeholder='Search: china AND trade, -spam, "exact phrase", china OR japan'
+        >
+        <div class="search-help" style="color: #8899a6; font-size: 13px; margin: -10px 0 20px 20px;">
+            💡 Tips: Use AND for all terms • OR for any term • -word to exclude • "quotes" for exact phrases
+        </div>
+
+        <div class="active-filters" id="activeFilters">
+            <div class="active-filters-header">
+                <div class="active-filters-title">Active Filters</div>
+                <button class="clear-all-btn" id="clearAllFilters">Clear All</button>
+            </div>
+            <div class="filter-chips" id="filterChips"></div>
+        </div>
+
+        <div class="chart-container" id="chartContainer">
+            <div class="chart-header">
+                <div class="chart-title">📊 Bookmarks by Month</div>
+                <button class="chart-toggle" id="chartToggle">Hide Chart</button>
+            </div>
+            <canvas id="bookmarksChart"></canvas>
+        </div>
+
+        <div class="terms-container" id="termsContainer">
+            <div class="terms-header">
+                <div class="terms-title">🔥 Trending Terms</div>
+                <button class="chart-toggle" id="termsToggle">Hide Terms</button>
+            </div>
+            <div class="terms-grid" id="termsGrid">
+                <div style="color: #8899a6; grid-column: 1 / -1;">Loading terms...</div>
+            </div>
+        </div>
+
+        <div class="terms-container" id="financialContainer">
+            <div class="terms-header">
+                <div class="terms-title">💰 Financial Terms & Tickers</div>
+                <button class="chart-toggle" id="financialToggle">Hide Financial</button>
+            </div>
+            <div class="terms-grid" id="financialGrid">
+                <div style="color: #8899a6; grid-column: 1 / -1;">Loading financial terms...</div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <select id="yearFilter">
+                <option value="">All Years</option>
+            </select>
+
+            <select id="sortBy">
+                <option value="date">Newest First</option>
+                <option value="likes">Most Liked</option>
+                <option value="retweets">Most Retweeted</option>
+                <option value="views">Most Views</option>
+            </select>
+
+            <button class="filter-btn" id="mediaFilter">Has Media</button>
+        </div>
+
+        <div id="bookmarksContainer">
+            <div class="loading">Loading your 22,540 bookmarks...</div>
+        </div>
+
+        <button class="load-more" id="loadMore" style="display: none;">Load More</button>
+    </div>
+
+    <script>
+        let allBookmarks = [];
+        let filteredBookmarks = [];
+        let currentPage = 0;
+        const pageSize = 50;
+        let filters = {
+            search: '',
+            year: '',
+            sort: 'date',
+            hasMedia: false
+        };
+        let bookmarksChart = null;
+        let chartVisible = true;
+        let termsVisible = true;
+        let financialVisible = true;
+
+        // Load bookmarks
+        fetch('x-bookmarks-latest.json')
+            .then(response => response.json())
+            .then(data => {
+                allBookmarks = data.bookmarks;
+                initializeFilters();
+                applyFilters();
+            })
+            .catch(error => {
+                document.getElementById('bookmarksContainer').innerHTML =
+                    '<div class="no-results">Error loading bookmarks. Make sure x-bookmarks-latest.json is in the same directory.</div>';
+                console.error('Error:', error);
+            });
+
+        function initializeFilters() {
+            // Update stats
+            document.getElementById('stats').textContent =
+                `${allBookmarks.length.toLocaleString()} bookmarks loaded`;
+
+            // Populate year filter
+            const years = [...new Set(allBookmarks.map(b => b.timestamp.substring(0, 4)))].sort().reverse();
+            const yearFilter = document.getElementById('yearFilter');
+            years.forEach(year => {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                yearFilter.appendChild(option);
+            });
+
+            // Add event listeners
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                filters.search = e.target.value.toLowerCase();
+                applyFilters();
+            });
+
+            document.getElementById('yearFilter').addEventListener('change', (e) => {
+                filters.year = e.target.value;
+                applyFilters();
+            });
+
+            document.getElementById('sortBy').addEventListener('change', (e) => {
+                filters.sort = e.target.value;
+                applyFilters();
+            });
+
+            document.getElementById('mediaFilter').addEventListener('click', (e) => {
+                filters.hasMedia = !filters.hasMedia;
+                e.target.classList.toggle('active');
+                applyFilters();
+            });
+
+            document.getElementById('loadMore').addEventListener('click', () => {
+                currentPage++;
+                renderBookmarks(false);
+            });
+
+            document.getElementById('clearAllFilters').addEventListener('click', () => {
+                clearAllFilters();
+            });
+
+            document.getElementById('chartToggle').addEventListener('click', () => {
+                chartVisible = !chartVisible;
+                const canvas = document.getElementById('bookmarksChart');
+                const button = document.getElementById('chartToggle');
+                if (chartVisible) {
+                    canvas.style.display = 'block';
+                    button.textContent = 'Hide Chart';
+                } else {
+                    canvas.style.display = 'none';
+                    button.textContent = 'Show Chart';
+                }
+            });
+
+            document.getElementById('termsToggle').addEventListener('click', () => {
+                termsVisible = !termsVisible;
+                const grid = document.getElementById('termsGrid');
+                const button = document.getElementById('termsToggle');
+                if (termsVisible) {
+                    grid.style.display = 'grid';
+                    button.textContent = 'Hide Terms';
+                } else {
+                    grid.style.display = 'none';
+                    button.textContent = 'Show Terms';
+                }
+            });
+
+            document.getElementById('financialToggle').addEventListener('click', () => {
+                financialVisible = !financialVisible;
+                const grid = document.getElementById('financialGrid');
+                const button = document.getElementById('financialToggle');
+                if (financialVisible) {
+                    grid.style.display = 'grid';
+                    button.textContent = 'Hide Financial';
+                } else {
+                    grid.style.display = 'none';
+                    button.textContent = 'Show Financial';
+                }
+            });
+
+            // Initialize chart
+            initializeChart();
+        }
+
+        function initializeChart() {
+            const ctx = document.getElementById('bookmarksChart').getContext('2d');
+            bookmarksChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Bookmarks',
+                        data: [],
+                        backgroundColor: 'rgba(29, 161, 242, 0.6)',
+                        borderColor: 'rgba(29, 161, 242, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#192734',
+                            borderColor: '#38444d',
+                            borderWidth: 1,
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.parsed.y} bookmarks`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: '#38444d'
+                            },
+                            ticks: {
+                                color: '#8899a6',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: '#38444d'
+                            },
+                            ticks: {
+                                color: '#8899a6'
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function applyFilters() {
+            currentPage = 0;
+
+            // Filter
+            filteredBookmarks = allBookmarks.filter(bookmark => {
+                // Search filter with advanced operators
+                if (filters.search) {
+                    if (!matchesAdvancedSearch(bookmark, filters.search)) {
+                        return false;
+                    }
+                }
+
+                // Year filter
+                if (filters.year && !bookmark.timestamp.startsWith(filters.year)) {
+                    return false;
+                }
+
+                // Media filter
+                if (filters.hasMedia && bookmark.media.length === 0) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            // Sort
+            switch (filters.sort) {
+                case 'date':
+                    filteredBookmarks.sort((a, b) =>
+                        new Date(b.timestamp) - new Date(a.timestamp)
+                    );
+                    break;
+                case 'likes':
+                    filteredBookmarks.sort((a, b) => b.metrics.likes - a.metrics.likes);
+                    break;
+                case 'retweets':
+                    filteredBookmarks.sort((a, b) => b.metrics.retweets - a.metrics.retweets);
+                    break;
+                case 'views':
+                    filteredBookmarks.sort((a, b) => b.metrics.views - a.metrics.views);
+                    break;
+            }
+
+            renderBookmarks(true);
+            updateChart();
+            updateTrendingTerms();
+            updateFinancialTerms();
+            updateActiveFilters();
+        }
+
+        function updateActiveFilters() {
+            const activeFiltersContainer = document.getElementById('activeFilters');
+            const filterChipsContainer = document.getElementById('filterChips');
+            const chips = [];
+
+            // Search filter
+            if (filters.search) {
+                chips.push({
+                    label: `Search: "${filters.search}"`,
+                    type: 'search'
+                });
+            }
+
+            // Year filter
+            if (filters.year) {
+                chips.push({
+                    label: `Year: ${filters.year}`,
+                    type: 'year'
+                });
+            }
+
+            // Media filter
+            if (filters.hasMedia) {
+                chips.push({
+                    label: 'Has Media',
+                    type: 'media'
+                });
+            }
+
+            // Sort (only show if not default)
+            if (filters.sort !== 'date') {
+                const sortLabels = {
+                    'likes': 'Sorted by Likes',
+                    'retweets': 'Sorted by Retweets',
+                    'views': 'Sorted by Views'
+                };
+                chips.push({
+                    label: sortLabels[filters.sort],
+                    type: 'sort'
+                });
+            }
+
+            // Show/hide active filters section
+            if (chips.length > 0) {
+                activeFiltersContainer.classList.add('visible');
+
+                // Render chips
+                filterChipsContainer.innerHTML = '';
+                chips.forEach(chip => {
+                    const chipEl = document.createElement('div');
+                    chipEl.className = 'filter-chip';
+                    chipEl.innerHTML = `
+                        <span>${escapeHtml(chip.label)}</span>
+                        <span class="filter-chip-remove" data-filter-type="${chip.type}">×</span>
+                    `;
+
+                    // Add click handler for remove button
+                    chipEl.querySelector('.filter-chip-remove').addEventListener('click', () => {
+                        removeFilter(chip.type);
+                    });
+
+                    filterChipsContainer.appendChild(chipEl);
+                });
+            } else {
+                activeFiltersContainer.classList.remove('visible');
+            }
+        }
+
+        function removeFilter(filterType) {
+            switch (filterType) {
+                case 'search':
+                    filters.search = '';
+                    document.getElementById('searchInput').value = '';
+                    break;
+                case 'year':
+                    filters.year = '';
+                    document.getElementById('yearFilter').value = '';
+                    break;
+                case 'media':
+                    filters.hasMedia = false;
+                    document.getElementById('mediaFilter').classList.remove('active');
+                    break;
+                case 'sort':
+                    filters.sort = 'date';
+                    document.getElementById('sortBy').value = 'date';
+                    break;
+            }
+            applyFilters();
+        }
+
+        function clearAllFilters() {
+            filters.search = '';
+            filters.year = '';
+            filters.hasMedia = false;
+            filters.sort = 'date';
+
+            document.getElementById('searchInput').value = '';
+            document.getElementById('yearFilter').value = '';
+            document.getElementById('sortBy').value = 'date';
+            document.getElementById('mediaFilter').classList.remove('active');
+
+            applyFilters();
+        }
+
+        function updateChart() {
+            // Calculate monthly counts from filtered bookmarks
+            const monthlyCounts = {};
+
+            filteredBookmarks.forEach(bookmark => {
+                // Get YYYY-MM format
+                const monthKey = bookmark.timestamp.substring(0, 7);
+                monthlyCounts[monthKey] = (monthlyCounts[monthKey] || 0) + 1;
+            });
+
+            // Sort months chronologically
+            const sortedMonths = Object.keys(monthlyCounts).sort();
+
+            // Prepare data for chart
+            const labels = sortedMonths.map(month => {
+                const [year, monthNum] = month.split('-');
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${monthNames[parseInt(monthNum) - 1]} ${year}`;
+            });
+
+            const data = sortedMonths.map(month => monthlyCounts[month]);
+
+            // Update chart
+            bookmarksChart.data.labels = labels;
+            bookmarksChart.data.datasets[0].data = data;
+            bookmarksChart.update();
+        }
+
+        function updateTrendingTerms() {
+            // Extract and count terms from filtered bookmarks
+            const stopWords = new Set([
+                'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i',
+                'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
+                'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she',
+                'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their',
+                'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go',
+                'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know',
+                'take', 'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them',
+                'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over',
+                'think', 'also', 'back', 'after', 'use', 'two', 'how', 'our', 'work',
+                'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these',
+                'give', 'day', 'most', 'us', 'is', 'was', 'are', 'been', 'has', 'had',
+                'were', 'said', 'did', 'having', 'may', 'should', 'am', 'being', 'here',
+                'where', 'why', 'too', 'much', 'very', 'more', 'such', 'still', 'own',
+                'through', 'man', 'down', 'side', 'end', 'world', 'since', 'both',
+                'last', 'long', 'little', 'house', 'during', 'without', 'again', 'place',
+                'around', 'however', 'home', 'small', 'found', 'thought', 'went', 'say',
+                'part', 'once', 'general', 'high', 'upon', 'school', 'every', 'dont',
+                'does', 'got', 'another', 'came', 'great', 'must', 'right', 'today',
+                'something', 'those', 'always', 'made', 'between', 'many', 'same', 'going',
+                'need', 'off', 'never', 'call', 'while', 'might', 'next', 'seems', 'lot',
+                'things', 'thing', 'really', 'actually', 'maybe', 'getting', 'pretty',
+                'via', 'rt', 'amp', 'th', 'https', 'http', 'www', 'com', 'co',
+                // Additional generic/common terms
+                'don', 'market', 'markets', 'data', 'real', 'business', 'year', 'years',
+                'company', 'companies', 'read', 'reading', 'article', 'post', 'thread',
+                'says', 'saying', 'fact', 'facts', 'point', 'points', 'problem', 'problems',
+                'question', 'questions', 'answer', 'answers', 'interesting', 'important',
+                'big', 'best', 'better', 'change', 'changes', 'different', 'true', 'false',
+                'example', 'examples', 'case', 'cases', 'result', 'results', 'report',
+                'study', 'research', 'number', 'numbers', 'rate', 'rates', 'level', 'levels'
+            ]);
+
+            const termCounts = {};
+            const minWordLength = 3;
+
+            filteredBookmarks.forEach(bookmark => {
+                // Extract words from text
+                const text = bookmark.text.toLowerCase();
+
+                // Extract individual words
+                const words = text.match(/\b[a-z]{3,}\b/g) || [];
+
+                words.forEach(word => {
+                    if (!stopWords.has(word) && word.length >= minWordLength) {
+                        termCounts[word] = (termCounts[word] || 0) + 1;
+                    }
+                });
+
+                // Also extract common 2-word phrases
+                const phrases = text.match(/\b[a-z]{3,}\s+[a-z]{3,}\b/g) || [];
+                phrases.forEach(phrase => {
+                    const words = phrase.split(' ');
+                    if (!words.some(w => stopWords.has(w))) {
+                        termCounts[phrase] = (termCounts[phrase] || 0) + 1;
+                    }
+                });
+            });
+
+            // Sort by frequency and take top terms
+            const topTerms = Object.entries(termCounts)
+                .filter(([term, count]) => count >= 3) // Minimum 3 occurrences
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 20);
+
+            // Render terms
+            const termsGrid = document.getElementById('termsGrid');
+
+            if (topTerms.length === 0) {
+                termsGrid.innerHTML = '<div style="color: #8899a6; grid-column: 1 / -1;">No trending terms found</div>';
+                return;
+            }
+
+            termsGrid.innerHTML = '';
+            topTerms.forEach(([term, count]) => {
+                const termItem = document.createElement('div');
+                termItem.className = 'term-item';
+                termItem.innerHTML = `
+                    <span class="term-text">${escapeHtml(term)}</span>
+                    <span class="term-count">${count}</span>
+                `;
+                termItem.addEventListener('click', () => {
+                    // Set search to this term
+                    document.getElementById('searchInput').value = term;
+                    filters.search = term.toLowerCase();
+                    applyFilters();
+                    // Scroll to top
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                termsGrid.appendChild(termItem);
+            });
+        }
+
+        function updateFinancialTerms() {
+            // Stock and ETF tickers (will be displayed with $ prefix in green)
+            const tickers = new Set([
+                // Major US Market ETFs
+                'spy', 'voo', 'ivv', 'qqq', 'dia', 'iwm', 'vti', 'vt', 'vxus',
+
+                // SPDR Sector ETFs
+                'xle', 'xlf', 'xlv', 'xli', 'xlb', 'xlk', 'xlc', 'xly', 'xlp', 'xlu', 'xlre',
+
+                // Vanguard Sector ETFs
+                'vde', 'vfh', 'vht', 'vis', 'vaw', 'vgt', 'vox', 'vcr', 'vdc', 'vpu', 'vnq',
+
+                // iShares Sector ETFs
+                'iye', 'iyf', 'iyh', 'iyj', 'iym', 'iyw', 'iyz', 'iyc', 'iyk', 'idu', 'iyr',
+
+                // Developed Markets ETFs
+                'vea', 'efa', 'vgk', 'ewj', 'ewu', 'ewg', 'ewl', 'ewq', 'ewc', 'ewa',
+                'ewp', 'ewn', 'ewo', 'ews', 'ewi', 'ewk', 'ewh',
+
+                // Emerging Markets ETFs
+                'vwo', 'eem', 'iemg', 'ewz', 'fxi', 'mchi', 'ewy', 'eww', 'inda', 'epi',
+                'ewt', 'eido', 'ewm', 'thd', 'ephe', 'ecns', 'eems', 'fm',
+
+                // Bond ETFs
+                'bnd', 'agg', 'tlt', 'ief', 'shy', 'tip', 'lqd', 'hyg', 'jnk', 'emb',
+                'bndx', 'vgit', 'vglt', 'vcit', 'vclt',
+
+                // Commodity & Real Asset ETFs
+                'gld', 'slv', 'gldm', 'iau', 'uso', 'ung', 'dba', 'dbc', 'pdbc',
+
+                // Specialty & Factor ETFs
+                'vtv', 'vug', 'voe', 'vb', 'vbk', 'vbr', 'vo', 'vov', 'iefa', 'iemg',
+                'schd', 'dgro', 'vym', 'vig',
+
+                // S&P 100 Stocks
+                'aapl', 'msft', 'googl', 'goog', 'amzn', 'nvda', 'tsla', 'meta', 'brk.b', 'unh',
+                'jnj', 'jpm', 'v', 'pg', 'ma', 'hd', 'cvx', 'mrk', 'abbv', 'pep',
+                'cost', 'avgo', 'lly', 'ko', 'adbe', 'tmo', 'mcd', 'csco', 'acn', 'wmt',
+                'abt', 'nflx', 'dhr', 'crm', 'vz', 'nke', 'txn', 'dis', 'pm', 'nee',
+                'ups', 'orcl', 'bmy', 'rtx', 'intc', 'hon', 'unp', 'low', 'amd', 'lin',
+                'qcom', 't', 'amgn', 'elv', 'gs', 'spgi', 'ba', 'intu', 'cop', 'mdt',
+                'ms', 'blk', 'de', 'pld', 'sbux', 'ge', 'axp', 'amat', 'bkng', 'mdlz',
+                'adi', 'now', 'tjx', 'syk', 'isrg', 'pfe', 'gild', 'cb', 'adp', 'mmc',
+                'vrtx', 'ci', 'regn', 'mo', 'zts', 'duk', 'c', 'so', 'usb', 'pnc',
+                'eog', 'itw', 'bdx', 'cvs', 'tgt', 'cme', 'mu', 'cl', 'shw', 'aon',
+                'mmm', 'noc', 'fis', 'hum', 'ew', 'bsx', 'apd', 'slb', 'nsc', 'gm',
+                'f', 'schw', 'met', 'cof'
+            ]);
+
+            // Financial/economic keywords (displayed without $ prefix)
+            const financialKeywords = new Set([
+                // Monetary policy
+                'fed', 'federal reserve', 'monetary policy', 'interest rates', 'rate hike',
+                'rate cut', 'qe', 'quantitative easing', 'tightening', 'dovish', 'hawkish',
+                'fomc', 'powell', 'yellen', 'treasury', 'bonds', 'yields',
+
+                // Economic indicators
+                'inflation', 'deflation', 'cpi', 'pce', 'unemployment', 'gdp', 'recession',
+                'stagflation', 'growth', 'productivity', 'wages', 'employment',
+
+                // Markets & Trading
+                'stocks', 'equities', 'bonds', 'commodities', 'forex', 'derivatives',
+                'options', 'futures', 'crypto', 'cryptocurrency', 'bitcoin', 'ethereum',
+                'bull market', 'bear market', 'correction', 'crash', 'volatility', 'vix',
+
+                // Valuation & Analysis
+                'valuation', 'pe ratio', 'earnings', 'revenue', 'profit', 'margin',
+                'ebitda', 'cash flow', 'balance sheet', 'debt', 'equity', 'dividend',
+                'buyback', 'ipo', 'merger', 'acquisition',
+
+                // Investment strategies
+                'portfolio', 'diversification', 'allocation', 'rebalancing', 'momentum',
+                'value investing', 'growth investing', 'index', 'etf', 'hedge fund',
+                'private equity', 'venture capital',
+
+                // Sectors & Industries
+                'tech', 'technology', 'energy', 'oil', 'gas', 'renewables', 'solar',
+                'finance', 'banking', 'insurance', 'healthcare', 'biotech', 'pharma',
+                'manufacturing', 'industrial', 'consumer', 'retail', 'real estate',
+                'telecom', 'utilities', 'materials', 'mining', 'agriculture',
+
+                // Geopolitics & Trade
+                'china', 'tariffs', 'trade war', 'sanctions', 'supply chain',
+                'globalization', 'deglobalization', 'exports', 'imports',
+
+                // Resources & Commodities
+                'gold', 'silver', 'copper', 'lithium', 'uranium', 'rare earth',
+                'semiconductors', 'chips', 'wheat', 'corn', 'soybeans',
+
+                // Risk & Crisis
+                'risk', 'credit risk', 'default', 'bankruptcy', 'bailout',
+                'systemic risk', 'contagion', 'bubble', 'leverage', 'deleveraging',
+
+                // Central concepts
+                'capitalism', 'socialism', 'fiscal policy', 'deficit', 'debt ceiling',
+                'taxes', 'regulation', 'deregulation', 'subsidy', 'tariff'
+            ]);
+
+            const termCounts = {};
+
+            filteredBookmarks.forEach(bookmark => {
+                const text = bookmark.text.toLowerCase();
+
+                // Extract stock tickers ($TICKER format)
+                const tickerMatches = bookmark.text.match(/\$[A-Z]{1,5}\b/g) || [];
+                tickerMatches.forEach(ticker => {
+                    termCounts[ticker] = (termCounts[ticker] || 0) + 1;
+                });
+
+                // Extract cashtags from lowercase text too (people write $btc, $eth, etc.)
+                const cashtagMatches = text.match(/\$[a-z]{2,5}\b/g) || [];
+                cashtagMatches.forEach(tag => {
+                    termCounts[tag.toUpperCase()] = (termCounts[tag.toUpperCase()] || 0) + 1;
+                });
+
+                // Look for stock/ETF tickers (format with $)
+                tickers.forEach(ticker => {
+                    // Use word boundary regex to match standalone tickers only
+                    const regex = new RegExp('\\b' + ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+                    if (regex.test(text)) {
+                        const tickerFormat = '$' + ticker.toUpperCase();
+                        termCounts[tickerFormat] = (termCounts[tickerFormat] || 0) + 1;
+                    }
+                });
+
+                // Look for financial keywords (no $ prefix)
+                financialKeywords.forEach(keyword => {
+                    let matches = false;
+
+                    if (keyword.includes(' ')) {
+                        // Multi-word phrases: use simple includes
+                        matches = text.includes(keyword);
+                    } else {
+                        // Single words: use word boundary regex to match standalone words only
+                        const regex = new RegExp('\\b' + keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+                        matches = regex.test(text);
+                    }
+
+                    if (matches) {
+                        termCounts[keyword] = (termCounts[keyword] || 0) + 1;
+                    }
+                });
+
+                // Extract common financial acronyms (all caps, 2-5 letters)
+                const acronyms = bookmark.text.match(/\b[A-Z]{2,5}\b/g) || [];
+                const financialAcronyms = new Set([
+                    'GDP', 'CPI', 'PPI', 'PCE', 'PMI', 'ISM', 'VIX', 'CAPE', 'ROE', 'ROI',
+                    'EBITDA', 'EPS', 'PE', 'PB', 'FOMC', 'SEC', 'FDIC', 'IMF', 'WTO',
+                    'ECB', 'BOJ', 'PBoC', 'EMU', 'EU', 'OPEC', 'WTI', 'LNG', 'ESG',
+                    'VC', 'IPO', 'M&A', 'ETF', 'DXY',
+                    'USD', 'EUR', 'JPY', 'CNY', 'GBP', 'CHF', 'AUD', 'CAD'
+                ]);
+                acronyms.forEach(acronym => {
+                    if (financialAcronyms.has(acronym)) {
+                        termCounts[acronym] = (termCounts[acronym] || 0) + 1;
+                    }
+                });
+            });
+
+            // Sort by frequency
+            const topTerms = Object.entries(termCounts)
+                .filter(([term, count]) => count >= 3) // Minimum 3 occurrences
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 30); // Show more financial terms
+
+            // Render terms
+            const financialGrid = document.getElementById('financialGrid');
+
+            if (topTerms.length === 0) {
+                financialGrid.innerHTML = '<div style="color: #8899a6; grid-column: 1 / -1;">No financial terms found</div>';
+                return;
+            }
+
+            financialGrid.innerHTML = '';
+            topTerms.forEach(([term, count]) => {
+                const termItem = document.createElement('div');
+                termItem.className = 'term-item';
+
+                // Add special styling for tickers
+                const isTicker = term.startsWith('$');
+                if (isTicker) {
+                    termItem.style.background = 'rgba(76, 175, 80, 0.1)';
+                    termItem.style.borderColor = 'rgba(76, 175, 80, 0.3)';
+                }
+
+                termItem.innerHTML = `
+                    <span class="term-text" style="${isTicker ? 'color: #4caf50;' : ''}">${escapeHtml(term)}</span>
+                    <span class="term-count">${count}</span>
+                `;
+                termItem.addEventListener('click', () => {
+                    // Set search to this term
+                    document.getElementById('searchInput').value = term;
+                    filters.search = term.toLowerCase();
+                    applyFilters();
+                    // Scroll to top
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+
+                // Special hover effect for tickers
+                if (isTicker) {
+                    termItem.addEventListener('mouseenter', () => {
+                        termItem.style.background = 'rgba(76, 175, 80, 0.2)';
+                        termItem.style.borderColor = 'rgba(76, 175, 80, 0.5)';
+                    });
+                    termItem.addEventListener('mouseleave', () => {
+                        termItem.style.background = 'rgba(76, 175, 80, 0.1)';
+                        termItem.style.borderColor = 'rgba(76, 175, 80, 0.3)';
+                    });
+                }
+
+                financialGrid.appendChild(termItem);
+            });
+        }
+
+        function renderBookmarks(clear = true) {
+            const container = document.getElementById('bookmarksContainer');
+            const loadMoreBtn = document.getElementById('loadMore');
+
+            if (clear) {
+                container.innerHTML = '';
+            }
+
+            if (filteredBookmarks.length === 0) {
+                container.innerHTML = '<div class="no-results">No bookmarks found matching your filters.</div>';
+                loadMoreBtn.style.display = 'none';
+                return;
+            }
+
+            const start = currentPage * pageSize;
+            const end = start + pageSize;
+            const bookmarksToShow = filteredBookmarks.slice(start, end);
+
+            bookmarksToShow.forEach(bookmark => {
+                const bookmarkEl = createBookmarkElement(bookmark);
+                container.appendChild(bookmarkEl);
+            });
+
+            // Show/hide load more button
+            if (end < filteredBookmarks.length) {
+                loadMoreBtn.style.display = 'block';
+                loadMoreBtn.textContent = `Load More (${filteredBookmarks.length - end} remaining)`;
+            } else {
+                loadMoreBtn.style.display = 'none';
+            }
+
+            // Update stats
+            document.getElementById('stats').textContent =
+                `Showing ${Math.min(end, filteredBookmarks.length)} of ${filteredBookmarks.length.toLocaleString()} bookmarks`;
+        }
+
+        function createBookmarkElement(bookmark) {
+            const div = document.createElement('div');
+            div.className = 'bookmark';
+
+            const date = new Date(bookmark.timestamp);
+            const formattedDate = date.toLocaleDateString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric'
+            });
+
+            const verified = bookmark.isVerified ? '<span class="verified">✓</span>' : '';
+            const mediaInfo = bookmark.media.length > 0
+                ? `<div class="media-preview">📷 ${bookmark.media.length} media item(s)</div>`
+                : '';
+
+            div.innerHTML = `
+                <div class="bookmark-header">
+                    <div class="user-info">
+                        <span class="display-name">${escapeHtml(bookmark.displayName)}</span>${verified}
+                        <span class="username">@${escapeHtml(bookmark.username)}</span>
+                    </div>
+                    <div class="timestamp">${formattedDate}</div>
+                </div>
+                <div class="bookmark-text">${escapeHtml(bookmark.text)}</div>
+                ${mediaInfo}
+                <div class="metrics">
+                    <span class="metric">💬 ${bookmark.metrics.replies.toLocaleString()}</span>
+                    <span class="metric">🔄 ${bookmark.metrics.retweets.toLocaleString()}</span>
+                    <span class="metric">❤️ ${bookmark.metrics.likes.toLocaleString()}</span>
+                    <span class="metric">👁️ ${bookmark.metrics.views.toLocaleString()}</span>
+                </div>
+                <a href="${bookmark.url}" target="_blank" class="view-tweet">View on X →</a>
+            `;
+
+            return div;
+        }
+
+        function matchesAdvancedSearch(bookmark, searchQuery) {
+            // Combine searchable fields
+            const searchableText = [
+                bookmark.text,
+                bookmark.username,
+                bookmark.displayName
+            ].join(' ').toLowerCase();
+
+            // Parse search query for operators
+            const query = searchQuery.trim();
+
+            // Handle empty query
+            if (!query) return true;
+
+            // Extract exact phrases (in quotes)
+            const phrases = [];
+            let workingQuery = query.replace(/"([^"]+)"/g, (match, phrase) => {
+                phrases.push({ phrase: phrase.toLowerCase(), exclude: false });
+                return ''; // Remove from working query
+            });
+
+            // Extract exclusions (words starting with -)
+            const exclusions = [];
+            workingQuery = workingQuery.replace(/-(\S+)/g, (match, word) => {
+                exclusions.push(word.toLowerCase());
+                return ''; // Remove from working query
+            });
+
+            // Check exclusions first (if any match, exclude this bookmark)
+            for (const exclusion of exclusions) {
+                if (searchableText.includes(exclusion)) {
+                    return false;
+                }
+            }
+
+            // Check exact phrases (all must be present)
+            for (const phraseObj of phrases) {
+                if (!searchableText.includes(phraseObj.phrase)) {
+                    return false;
+                }
+            }
+
+            // Clean up working query
+            workingQuery = workingQuery.trim();
+            if (!workingQuery) {
+                // Only had phrases/exclusions, and they all passed
+                return phrases.length > 0 || exclusions.length > 0;
+            }
+
+            // Check for OR operator
+            if (workingQuery.includes(' OR ')) {
+                const orTerms = workingQuery.split(' OR ').map(t => t.trim().toLowerCase());
+                return orTerms.some(term => {
+                    // Each OR term might have multiple AND words
+                    if (term.includes(' ')) {
+                        const andWords = term.split(/\s+/);
+                        return andWords.every(word => searchableText.includes(word));
+                    }
+                    return searchableText.includes(term);
+                });
+            }
+
+            // Check for AND operator (explicit)
+            if (workingQuery.includes(' AND ')) {
+                const andTerms = workingQuery.split(' AND ').map(t => t.trim().toLowerCase());
+                return andTerms.every(term => searchableText.includes(term));
+            }
+
+            // Default: space-separated = implicit AND
+            const words = workingQuery.split(/\s+/).filter(w => w.length > 0);
+            return words.every(word => searchableText.includes(word.toLowerCase()));
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
