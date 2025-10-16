@@ -2,6 +2,18 @@
 
 **Extract ALL your X (Twitter) bookmarks with real engagement metrics.**
 
+## 🔄 Incremental Updates (Recommended!)
+
+If you already have `x-bookmarks-latest.json`, you can capture only **new** bookmarks:
+
+**Benefits:**
+- Only captures NEW bookmarks you haven't saved yet
+- Automatically stops scrolling after encountering 5 consecutive batches of existing bookmarks
+- Saves time and bandwidth (seconds vs minutes)
+- No need to scroll through 22,540+ existing bookmarks
+
+---
+
 ## 🚀 Complete Process
 
 ### Step 1: Navigate to X Bookmarks
@@ -12,19 +24,105 @@ await mcp__playwright__browser_navigate({ url: "https://x.com/i/bookmarks" });
 ### Step 2: User Login
 Let user login with their X account. Wait for confirmation before continuing.
 
-### Step 3: Read and Inject GraphQL Interceptor
+### Step 3: Inject Interceptor (No Auto-Start)
 ```javascript
-const script = await Bun.file('./graphql-interceptor.js').text();
-await mcp__playwright__browser_evaluate({ 
-  function: `() => { ${script} }`, 
-  element: "GraphQL interceptor injection" 
+const script = await Bun.file('./interceptor-no-autostart.js').text();
+await mcp__playwright__browser_evaluate({
+  function: `() => { ${script} }`,
+  element: "GraphQL interceptor (no auto-start)"
 });
 ```
 
-### Step 4: Monitor Auto-Extraction
-The system auto-scrolls and captures all bookmarks. Monitor progress in console.
+### Step 4: Load Existing Bookmarks (For Incremental Updates)
 
-### Step 5: Find Downloads Location
+**Required inputs:**
+- `x-bookmarks-latest.json` file path (absolute path)
+
+```javascript
+// Trigger file upload dialog
+await mcp__playwright__browser_evaluate({
+  function: `async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (window.bookmarkInterceptor) {
+        window.bookmarkInterceptor.loadExistingBookmarks(data);
+        console.log('✅ Existing bookmarks loaded!');
+      }
+    };
+    input.click();
+  }`,
+  element: "File upload prompt for existing bookmarks"
+});
+
+// Upload the file
+await mcp__playwright__browser_file_upload({
+  paths: ["/Users/howardwu/dev/cc-scrape-x-bookmarks/x-bookmarks-latest.json"]
+});
+```
+
+**Console output:**
+```
+📂 Select your x-bookmarks-latest.json file...
+📖 Reading x-bookmarks-latest.json...
+[X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+✅ Existing bookmarks loaded! Auto-scroll will now stop when it encounters them.
+```
+
+**For first-time extraction:** Skip this step entirely.
+
+### Step 5: Start Auto-Scroll Manually
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    let scrollCount = 0;
+    const maxScrolls = 10000;
+    const scrollDelay = 2000;
+
+    function performScroll() {
+      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
+        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
+        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
+        return;
+      }
+      if (scrollCount >= maxScrolls) return;
+
+      const currentHeight = document.body.scrollHeight;
+      window.scrollTo(0, currentHeight);
+      scrollCount++;
+      console.log(\`📜 Auto-scroll \${scrollCount}/\${maxScrolls} - Scrolled to: \${currentHeight}\`);
+
+      setTimeout(() => {
+        if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
+          console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
+          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
+          return;
+        }
+        if (document.body.scrollHeight === currentHeight) {
+          console.log('🏁 Auto-scroll completed. Reached bottom of page.');
+          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
+          return;
+        }
+        performScroll();
+      }, scrollDelay);
+    }
+
+    console.log('🚀 Starting auto-scroll in 3 seconds...');
+    setTimeout(performScroll, 3000);
+  }`,
+  element: "Start auto-scroll function"
+});
+```
+
+### Step 6: Monitor Auto-Extraction
+The system auto-scrolls and captures bookmarks. Monitor progress via console messages.
+
+### Step 7: Find Downloads Location
 ```javascript
 await mcp__playwright__browser_evaluate({ 
   function: `() => {
@@ -35,14 +133,20 @@ await mcp__playwright__browser_evaluate({
 });
 ```
 
-### Step 6: Combine All Files
+### Step 8: Combine All Files (Optional)
 ```bash
+# Files are auto-downloaded to Downloads folder
+# Combine them if you have multiple extraction runs
+BOOKMARK_FILES_DIR="~/Downloads" bun combine-bookmarks.ts
+
+# Or specify custom Playwright output directory
 BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmarks.ts
 ```
 
-### Step 7: Copy to Current Directory
+### Step 9: Copy to Current Directory
 ```bash
-cp "/path/to/x-bookmarks-latest.json" ./
+# Copy the latest combined file back to project
+cp ~/Downloads/x-bookmarks-latest.json ./
 ```
 
 ## 📊 What You Get
@@ -70,12 +174,42 @@ BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmark
 
 ## 📋 Console Output Example
 
+**Full Extraction Mode (First Time):**
 ```
-📚 X Bookmark GraphQL Interceptor started!
-🤖 Auto-scroll will begin in 3 seconds...
-📜 Auto-scroll 1/10000 - Scrolled to: 7208
-[X-Bookmarks-GraphQL] Captured 20 bookmarks (total: 40)
-[X-Bookmarks-GraphQL] Downloaded 40 bookmarks to x-bookmarks-graphql-*.json
+✅ Interceptor ready! Use window.bookmarkInterceptor
+[X-Bookmarks-GraphQL] GraphQL interceptor installed
+[X-Bookmarks-GraphQL] Execution context check passed
+🚀 Starting auto-scroll in 3 seconds...
+📜 Auto-scroll 1/10000 - Scrolled to: 8262
+[X-Bookmarks-GraphQL] Detected bookmark GraphQL request
+[X-Bookmarks-GraphQL] ✅ Captured 20 new bookmarks (0 already existed, total: 20)
+[X-Bookmarks-GraphQL] Downloaded 20 bookmarks to x-bookmarks-graphql-2025-10-15T04-56-07.json
+📜 Auto-scroll 2/10000 - Scrolled to: 17792
+```
+
+**Incremental Update Mode:**
+```
+✅ Interceptor ready! Use window.bookmarkInterceptor
+[X-Bookmarks-GraphQL] GraphQL interceptor installed
+📂 Select your x-bookmarks-latest.json file...
+📖 Reading x-bookmarks-latest.json...
+[X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+[X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
+✅ Existing bookmarks loaded! Auto-scroll will now stop when it encounters them.
+
+🚀 Starting auto-scroll in 3 seconds...
+📜 Auto-scroll 1/10000 - Scrolled to: 8262
+[X-Bookmarks-GraphQL] ✅ Captured 20 new bookmarks (0 already existed, total: 20)
+📜 Auto-scroll 2/10000 - Scrolled to: 17792
+[X-Bookmarks-GraphQL] ⏭️  Skipping existing bookmark: 1977089288895345130
+[X-Bookmarks-GraphQL] ✅ Captured 14 new bookmarks (6 already existed, total: 34)
+📜 Auto-scroll 3/10000 - Scrolled to: 25105
+[X-Bookmarks-GraphQL] ⏭️  Skipping existing bookmark: 1977091670014300659
+[X-Bookmarks-GraphQL] ⚠️  All 20 bookmarks in this batch already exist (consecutive: 1/5)
+[X-Bookmarks-GraphQL] ⚠️  All 20 bookmarks in this batch already exist (consecutive: 5/5)
+[X-Bookmarks-GraphQL] 🛑 Stopping auto-scroll: encountered 5 consecutive batches of existing bookmarks
+🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.
+📊 Captured 34 new bookmarks.
 ```
 
 ## 🛑 Manual Control (If Needed)

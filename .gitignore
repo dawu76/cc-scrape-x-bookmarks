@@ -1,0 +1,5 @@
+# Ignore the latest bookmarks JSON file
+x-bookmarks-latest.json
+
+# Ignore generated injection script (contains all existing bookmarks)
+injection-script.js

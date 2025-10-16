@@ -497,45 +497,13 @@ function startAutoScroll() {
   setTimeout(performScroll, 3000);
 }
 
-// Auto-start if we're on the bookmarks page
-if (window.location.pathname === '/i/bookmarks') {
-  window.bookmarkInterceptor.loadBookmarks();
-  window.bookmarkInterceptor.install();
-
-  console.log('📚 X Bookmark GraphQL Interceptor started!');
-  console.log('');
-
-  // Check if existing bookmarks were pre-loaded via window.__EXISTING_BOOKMARKS__
-  if (window.__EXISTING_BOOKMARKS__) {
-    console.log('🎯 Auto-loading existing bookmarks for incremental update mode...');
-    window.bookmarkInterceptor.loadExistingBookmarks(window.__EXISTING_BOOKMARKS__);
-    console.log('✅ Incremental mode activated! Auto-scroll will stop when it encounters existing bookmarks.');
-    console.log('');
-  } else {
-    console.log('🔄 INCREMENTAL UPDATE MODE:');
-    console.log('To skip bookmarks you already have, load your existing file first:');
-    console.log('  1. Copy contents of x-bookmarks-latest.json');
-    console.log('  2. Run: window.bookmarkInterceptor.loadExistingBookmarks(PASTE_JSON_HERE)');
-    console.log('  3. Auto-scroll will stop when it encounters existing bookmarks');
-    console.log('');
-    console.log('Or continue now to capture ALL bookmarks (auto-scroll begins in 3 seconds)');
-    console.log('');
-  }
-
-  console.log('📖 Manual control commands:');
-  console.log('  - .getBookmarkCount() - Get current count');
-  console.log('  - .getAllBookmarks() - Get all captured bookmarks');
-  console.log('  - .loadExistingBookmarks(json) - Load existing bookmarks to enable incremental mode');
-  console.log('  - .saveBookmarks() - Force save/download');
-  console.log('  - .clearBookmarks() - Clear all data');
-  console.log('  - .resetStopFlag() - Reset stop flag to continue scrolling');
-  console.log('  - .uninstall() - Stop intercepting');
-
-  // Start auto-scrolling
-  startAutoScroll();
-}
 
 // Export for module usage
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module \!== 'undefined' && module.exports) {
   module.exports = BookmarkGraphQLInterceptor;
 }
+
+console.log('✅ Interceptor ready\! Use window.bookmarkInterceptor');
+console.log('📖 To load existing bookmarks: Use Claude Code file upload');
+console.log('🚀 To start manually: Call startAutoScroll()');
+
