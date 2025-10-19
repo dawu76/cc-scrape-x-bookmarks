@@ -77,13 +77,59 @@ See `INCREMENTAL-UPDATE-GUIDE.md` for detailed instructions.
 ## 📁 Output Files
 
 - `x-bookmarks-graphql-*.json` - Individual extraction files
-- `x-bookmarks-combined-*.json` - All bookmarks in one file  
+- `x-bookmarks-combined-*.json` - All bookmarks in one file
 - `x-bookmarks-latest.json` - Easy access to most recent extraction
 
 To combine multiple files:
 ```bash
+# First, ensure bun is installed
+# If not installed, run: curl -fsSL https://bun.sh/install | bash
+
 bun combine-bookmarks.ts
 ```
+
+**Safety Features:**
+- ✅ Automatic backup before overwriting `x-bookmarks-latest.json`
+- ✅ Prevents data loss: Won't update if new file has fewer bookmarks
+- ✅ Early exit if no files found (won't create empty files)
+- ✅ Timestamped backups saved alongside combined files
+- ✅ Automatically includes existing `x-bookmarks-latest.json` in merge for seamless incremental updates
+
+## 📊 Viewing Your Bookmarks
+
+The project includes an interactive HTML viewer with:
+- Advanced search (AND/OR operators, exclusions, exact phrases)
+- Charts showing bookmark trends over time
+- Trending terms and financial ticker detection
+- Filters by year, engagement metrics, and media
+
+**To view your bookmarks:**
+```bash
+./view-bookmarks.sh
+```
+
+This will start a local web server and open the viewer in your browser. Press `Ctrl+C` when done to stop the server.
+
+**Search examples:**
+- `china AND trade` - Both terms required
+- `bitcoin OR ethereum` - Either term matches
+- `"exact phrase"` - Must match exactly
+- `-spam` - Exclude term
+
+## 🔧 Troubleshooting
+
+### "command not found: bun"
+Install bun runtime:
+```bash
+curl -fsSL https://bun.sh/install | bash
+exec $SHELL  # Restart shell to load bun
+```
+
+### File upload errors during incremental mode
+Claude Code automatically uses a direct injection approach that avoids file upload dialog issues. If you see context destruction errors, ensure you're using the latest version of `CLAUDE.md`.
+
+### Large file/response errors
+These are handled automatically by Claude Code using file system checks instead of browser console reads. No action needed.
 
 ## 🙏 Credits
 

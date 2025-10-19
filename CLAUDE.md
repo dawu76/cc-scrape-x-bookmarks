@@ -38,40 +38,36 @@ await mcp__playwright__browser_evaluate({
 **Required inputs:**
 - `x-bookmarks-latest.json` file path (absolute path)
 
-```javascript
-// Trigger file upload dialog
-await mcp__playwright__browser_evaluate({
-  function: `async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (window.bookmarkInterceptor) {
-        window.bookmarkInterceptor.loadExistingBookmarks(data);
-        console.log('✅ Existing bookmarks loaded!');
-      }
-    };
-    input.click();
-  }`,
-  element: "File upload prompt for existing bookmarks"
-});
+**Approach:** Extract bookmark IDs from the existing file and inject them directly into the interceptor. This avoids file upload dialog issues.
 
-// Upload the file
-await mcp__playwright__browser_file_upload({
-  paths: ["/Users/howardwu/dev/cc-scrape-x-bookmarks/x-bookmarks-latest.json"]
+```bash
+# Extract just the bookmark IDs from existing file (more efficient than loading full file)
+cat x-bookmarks-latest.json | jq -c '{bookmarks: [.bookmarks[] | {id: .id}]}'
+```
+
+Then inject the IDs directly into the browser:
+
+```javascript
+// Load existing bookmarks directly (replace BOOKMARK_IDS_JSON with output from jq command above)
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    const existingBookmarks = BOOKMARK_IDS_JSON;
+    if (window.bookmarkInterceptor) {
+      window.bookmarkInterceptor.loadExistingBookmarks(existingBookmarks);
+      console.log('✅ Existing bookmarks loaded!');
+    }
+  }`,
+  element: "Load existing bookmark IDs"
 });
 ```
+
+**Note:** Claude Code will handle extracting the IDs and injecting them automatically. You don't need to manually copy-paste the JSON.
 
 **Console output:**
 ```
-📂 Select your x-bookmarks-latest.json file...
-📖 Reading x-bookmarks-latest.json...
 [X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
-✅ Existing bookmarks loaded! Auto-scroll will now stop when it encounters them.
+[X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
+✅ Existing bookmarks loaded!
 ```
 
 **For first-time extraction:** Skip this step entirely.
@@ -82,7 +78,7 @@ await mcp__playwright__browser_evaluate({
   function: `() => {
     let scrollCount = 0;
     const maxScrolls = 10000;
-    const scrollDelay = 2000;
+    const scrollDelay = 4000;
 
     function performScroll() {
       if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
@@ -254,6 +250,27 @@ This will show you both:
 - **Latest file**: `x-bookmarks-latest.json` (easy access to most recent)
 
 **Perfect for**: Backing up bookmarks, data analysis, building personal tools, archiving collections.
+
+## 📊 Viewing Your Bookmarks
+
+After extraction and combining, view your bookmarks in an interactive interface:
+
+```bash
+./view-bookmarks.sh
+```
+
+This will:
+1. Start a local Python web server on port 8080
+2. Open the bookmark viewer in your browser
+3. Load your `x-bookmarks-latest.json` file
+
+**Features:**
+- Advanced search with AND/OR operators, exclusions, exact phrases
+- Monthly bookmark timeline chart
+- Trending terms and financial ticker detection
+- Filter by year, engagement metrics, or media
+
+Press `Ctrl+C` to stop the server when done.
 
 ---
 

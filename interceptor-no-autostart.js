@@ -454,7 +454,7 @@ window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
 function startAutoScroll() {
   let scrollCount = 0;
   const maxScrolls = 10000; // Increased limit - will stop when hitting existing bookmarks
-  const scrollDelay = 2000; // 2 seconds between scrolls
+  const scrollDelay = 4000; // 4 seconds between scrolls
 
   function performScroll() {
     // Check if we should stop due to existing bookmarks

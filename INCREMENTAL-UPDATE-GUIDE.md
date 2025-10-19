@@ -49,9 +49,10 @@ When Claude runs incremental mode, you'll see console messages like:
 **Initial Setup:**
 ```
 ✅ Interceptor ready!
-📂 Select your x-bookmarks-latest.json file...
-📖 Reading x-bookmarks-latest.json...
+[X-Bookmarks-GraphQL] GraphQL interceptor installed
+[X-Bookmarks-GraphQL] Execution context check passed
 [X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+[X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
 ✅ Existing bookmarks loaded!
 🚀 Starting auto-scroll in 3 seconds...
 ```
@@ -133,12 +134,16 @@ Claude will skip loading the existing file and capture everything.
 
 ### How do I combine new bookmarks with old ones?
 
-After extraction completes, Claude can combine all files for you. Just ask:
-```
-"Combine all my bookmark files"
+After extraction completes, just run the combine script:
+```bash
+bun combine-bookmarks.ts
 ```
 
-The combination script automatically handles deduplication.
+The script automatically:
+- Finds all bookmark files (graphql extractions, combined files, and latest.json)
+- Merges them with deduplication by bookmark ID
+- Creates timestamped backups before overwriting
+- Won't overwrite if the new file has fewer bookmarks (data loss protection)
 
 ## What Happens to Downloaded Files?
 
