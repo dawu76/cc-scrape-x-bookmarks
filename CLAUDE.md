@@ -38,22 +38,32 @@ await mcp__playwright__browser_evaluate({
 **Required inputs:**
 - `x-bookmarks-latest.json` file path (absolute path)
 
-**Approach:** Extract bookmark IDs from the existing file and inject them directly into the interceptor. This avoids file upload dialog issues.
+**Approach:** Extract bookmark IDs from the existing file and inject them directly into the interceptor.
+
+**Important:** For efficiency and to avoid file size/token limits, we only load the **1,000 most recent** bookmark IDs. This is sufficient because:
+- Bookmarks are ordered chronologically (newest first)
+- New bookmarks will be at the top of your feed
+- The auto-stop mechanism (5 consecutive batches of existing bookmarks) handles the rest
 
 ```bash
-# Extract just the bookmark IDs from existing file (more efficient than loading full file)
-cat x-bookmarks-latest.json | jq -c '{bookmarks: [.bookmarks[] | {id: .id}]}'
+# Extract the 1,000 most recent bookmark IDs (not all IDs)
+jq -r '.bookmarks[0:1000] | map(.id) | @json' x-bookmarks-latest.json
 ```
 
 Then inject the IDs directly into the browser:
 
 ```javascript
-// Load existing bookmarks directly (replace BOOKMARK_IDS_JSON with output from jq command above)
+// Load the 1,000 most recent bookmark IDs
 await mcp__playwright__browser_evaluate({
   function: `() => {
-    const existingBookmarks = BOOKMARK_IDS_JSON;
+    const recentIds = BOOKMARK_IDS_ARRAY; // Array of 1000 most recent IDs
+    const bookmarksData = {
+      bookmarks: recentIds.map(id => ({ id: id }))
+    };
+
     if (window.bookmarkInterceptor) {
-      window.bookmarkInterceptor.loadExistingBookmarks(existingBookmarks);
+      window.bookmarkInterceptor.existingBookmarkIds.clear();
+      window.bookmarkInterceptor.loadExistingBookmarks(bookmarksData);
       console.log('✅ Existing bookmarks loaded!');
     }
   }`,
@@ -65,7 +75,7 @@ await mcp__playwright__browser_evaluate({
 
 **Console output:**
 ```
-[X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
 [X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
 ✅ Existing bookmarks loaded!
 ```
@@ -118,16 +128,19 @@ await mcp__playwright__browser_evaluate({
 ### Step 6: Monitor Auto-Extraction
 The system auto-scrolls and captures bookmarks. Monitor progress via console messages.
 
-### Step 7: Find Downloads Location
+### Step 7: Check Progress
 ```javascript
-await mcp__playwright__browser_evaluate({ 
+await mcp__playwright__browser_evaluate({
   function: `() => {
-    const count = window.bookmarkInterceptor ? window.bookmarkInterceptor.getBookmarkCount() : 'Not found';
-    return \`Bookmark count: \${count}\`;
-  }`, 
-  element: "Check bookmark count and download location" 
+    const count = window.bookmarkInterceptor ? window.bookmarkInterceptor.getBookmarkCount() : 'N/A';
+    const stopped = window.bookmarkInterceptor ? window.bookmarkInterceptor.shouldStopAutoScroll() : false;
+    return \`New bookmarks: \${count}, Auto-scroll stopped: \${stopped}\`;
+  }`,
+  element: "Check bookmark extraction progress"
 });
 ```
+
+**Note:** This returns a simple string to avoid response size limits. Complex objects can exceed token limits.
 
 ### Step 8: Combine All Files (Optional)
 ```bash
@@ -187,11 +200,9 @@ BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmark
 ```
 ✅ Interceptor ready! Use window.bookmarkInterceptor
 [X-Bookmarks-GraphQL] GraphQL interceptor installed
-📂 Select your x-bookmarks-latest.json file...
-📖 Reading x-bookmarks-latest.json...
-[X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
 [X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
-✅ Existing bookmarks loaded! Auto-scroll will now stop when it encounters them.
+✅ Existing bookmarks loaded!
 
 🚀 Starting auto-scroll in 3 seconds...
 📜 Auto-scroll 1/10000 - Scrolled to: 8262
@@ -223,25 +234,25 @@ window.bookmarkInterceptor.saveBookmarks()
 
 ## 📂 Finding Your Downloaded Files
 
-Before combining files, you can check where Playwright is saving the extracted bookmark files:
+Files are typically auto-downloaded to one of these locations:
+- `.playwright-mcp/` directory in your project
+- `~/Downloads/` folder
+- `/var/folders/.../playwright-mcp-output/` (temporary directory)
+
+To check progress during extraction:
 
 ```javascript
-// Use this in Claude Code to check download location and file count
-await mcp__playwright__browser_evaluate({ 
+await mcp__playwright__browser_evaluate({
   function: `() => {
-    // Check current status only
-    const count = window.bookmarkInterceptor ? window.bookmarkInterceptor.getBookmarkCount() : 'Not found';
-    return \`Bookmark count: \${count}\`;
-  }`, 
-  element: "Check bookmark count only" 
+    const count = window.bookmarkInterceptor ? window.bookmarkInterceptor.getBookmarkCount() : 'N/A';
+    const stopped = window.bookmarkInterceptor ? window.bookmarkInterceptor.shouldStopAutoScroll() : false;
+    return \`New bookmarks: \${count}, Auto-scroll stopped: \${stopped}\`;
+  }`,
+  element: "Check extraction progress"
 });
 ```
 
-This will show you both:
-- Current bookmark count extracted
-- The file download location (usually `/var/folders/.../playwright-mcp-output/`)
-
-**Note**: Once you know the download location, update the `combine-bookmarks.ts` file to point to the correct directory before running the combination script.
+**Note**: Use the appropriate directory path in `BOOKMARK_FILES_DIR` when running the combine script.
 
 ## 🎯 Results
 
@@ -271,6 +282,54 @@ This will:
 - Filter by year, engagement metrics, or media
 
 Press `Ctrl+C` to stop the server when done.
+
+---
+
+## 🔧 Troubleshooting
+
+### Why only load 1,000 recent bookmark IDs?
+
+**Problem**: Loading all bookmark IDs (e.g., 28,000+) causes several issues:
+- File size exceeds browser/tool limits (600KB+ JSON)
+- Token limits in responses (25,000 token max)
+- Slow injection time
+
+**Solution**: Load only the 1,000 most recent IDs because:
+- Bookmarks are chronologically ordered (newest first)
+- New bookmarks appear at the top of your feed
+- The auto-stop mechanism (5 consecutive batches) handles detection
+- Typical incremental updates are <500 bookmarks
+
+### Browser Security Restrictions
+
+**Problem**: Cannot use `fetch('file://...')` to load bookmark files in browser
+- Browsers block file:// protocol for security (CORS policy)
+
+**Solution**: Extract IDs via command line and inject directly as JavaScript arrays
+
+### Response Size Limits
+
+**Problem**: Complex object returns can exceed 25,000 token limits
+- `browser_evaluate` with large objects fails
+- `browser_console_messages` with many logs fails
+
+**Solution**: Return simple strings instead of complex objects:
+```javascript
+// ❌ Avoid: Complex objects
+return { count: X, bookmarks: [...], status: {...} };
+
+// ✅ Prefer: Simple strings
+return `New bookmarks: ${count}, Stopped: ${stopped}`;
+```
+
+### File Combining Performance
+
+**Problem**: Combine script processes many duplicate files
+
+**Solution**: The script automatically deduplicates. For large collections:
+- First run may take 30-60 seconds
+- Subsequent runs are faster
+- ~20M duplicates are normal across historical runs
 
 ---
 

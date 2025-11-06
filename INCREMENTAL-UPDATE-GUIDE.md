@@ -51,7 +51,7 @@ When Claude runs incremental mode, you'll see console messages like:
 ✅ Interceptor ready!
 [X-Bookmarks-GraphQL] GraphQL interceptor installed
 [X-Bookmarks-GraphQL] Execution context check passed
-[X-Bookmarks-GraphQL] Loaded 22540 existing bookmark IDs
+[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
 [X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
 ✅ Existing bookmarks loaded!
 🚀 Starting auto-scroll in 3 seconds...
@@ -76,11 +76,13 @@ When Claude runs incremental mode, you'll see console messages like:
 
 ## How It Works Behind the Scenes
 
-1. **Load Existing IDs**: Claude loads all your existing bookmark IDs (22,540+) into memory
-2. **Check Each Bookmark**: As new bookmarks are captured, they're checked against existing IDs
+1. **Load Recent IDs**: Claude loads the **1,000 most recent** bookmark IDs into memory (not all IDs)
+2. **Check Each Bookmark**: As new bookmarks are captured, they're checked against these IDs
 3. **Skip Duplicates**: Bookmarks you already have are automatically skipped
 4. **Track Progress**: The system counts consecutive batches where ALL bookmarks already exist
 5. **Auto-Stop**: After 5 consecutive batches of only existing bookmarks, the extraction stops
+
+**Why only 1,000 IDs?** Loading all IDs (20,000+) causes file size and performance issues. Since bookmarks are chronologically ordered (newest first), loading the 1,000 most recent IDs is sufficient - the auto-stop mechanism handles the rest.
 
 **Why 5 batches?** This ensures the system doesn't stop too early if you have a few old bookmarks mixed with new ones. It only stops when it's confident you've reached the "already saved" section.
 
@@ -99,9 +101,10 @@ For incremental mode to work, you need:
 
 ✅ **Faster**: Only captures new bookmarks (takes seconds instead of minutes)
 ✅ **Efficient**: Stops automatically when reaching old bookmarks
-✅ **Smart**: Doesn't scroll through thousands of bookmarks you already have
+✅ **Smart**: Loads only 1,000 recent IDs for optimal performance
 ✅ **Safe**: Original bookmarks are never modified
 ✅ **Bandwidth-Friendly**: Downloads only what's new
+✅ **Scalable**: Works with collections of any size (tested with 28,000+ bookmarks)
 
 ## Common Questions
 
