@@ -58,7 +58,7 @@ Already extracted your bookmarks? The system can now capture **only new bookmark
 **How it works:**
 1. Inject the interceptor (`interceptor-no-autostart.js`)
 2. Upload your existing `x-bookmarks-latest.json` file
-3. System loads 22,540+ existing bookmark IDs into memory
+3. System loads existing bookmark IDs into memory
 4. Start auto-scroll
 5. New bookmarks are captured, existing ones are skipped
 6. Auto-stops after 5 consecutive batches of all existing bookmarks

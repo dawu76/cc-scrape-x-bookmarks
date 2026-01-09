@@ -6,7 +6,7 @@ This document contains all the shell commands used during the bookmark extractio
 
 ```bash
 # Navigate to project directory
-cd /Users/howardwu/dev/cc-scrape-x-bookmarks
+cd /path/to/cc-scrape-x-bookmarks
 ```
 
 ## Bookmark Extraction Process
@@ -167,7 +167,7 @@ git status
 
 # Stage specific files
 git add bookmark-viewer.html
-git add graphql-interceptor.js
+git add interceptor-no-autostart.js
 git add CLAUDE.md
 
 # Or stage all changes
@@ -255,7 +255,7 @@ alias gp='git push'
 alias gl='git log --oneline -10'
 
 # Directory shortcuts
-alias proj='cd /Users/howardwu/dev/cc-scrape-x-bookmarks'
+alias proj='cd /path/to/cc-scrape-x-bookmarks'
 
 # Quick JSON pretty-print
 alias json='jq .'
@@ -300,7 +300,7 @@ tar -xzf bookmarks-archive.tar.gz
 
 ```bash
 # If you get permission denied
-sudo chown -R $USER:staff ~/.playwright-mcp/
+sudo chown -R $USER:$USER ~/.playwright-mcp/
 
 # Make script executable
 chmod +x script.sh

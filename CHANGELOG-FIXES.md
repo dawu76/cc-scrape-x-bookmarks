@@ -94,8 +94,6 @@ Before next extraction, verify:
 
 ---
 
----
-
 ### 6. Added Easy Bookmark Viewer Launch Script
 
 **File:** `view-bookmarks.sh` (new file)

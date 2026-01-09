@@ -9,7 +9,13 @@ SERVER_PID=$!
 sleep 1
 
 echo "📊 Opening bookmark viewer in your browser..."
-open http://localhost:8080/bookmark-viewer.html
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  xdg-open http://localhost:8080/bookmark-viewer.html
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  open http://localhost:8080/bookmark-viewer.html
+else
+  echo "⚠️  Could not detect OS. Please open http://localhost:8080/bookmark-viewer.html manually."
+fi
 
 echo ""
 echo "✅ Bookmark viewer is now running!"

@@ -96,7 +96,11 @@ await mcp__playwright__browser_evaluate({
         console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
         return;
       }
-      if (scrollCount >= maxScrolls) return;
+      if (scrollCount >= maxScrolls) {
+        console.log('🏁 Auto-scroll stopped: Maximum scroll limit reached.');
+        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} bookmarks.\`);
+        return;
+      }
 
       const currentHeight = document.body.scrollHeight;
       window.scrollTo(0, currentHeight);

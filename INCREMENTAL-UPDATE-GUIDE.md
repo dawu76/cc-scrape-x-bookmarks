@@ -94,8 +94,7 @@ For incremental mode to work, you need:
 - `x-bookmarks-latest.json` - Your previous bookmark extraction (must be in project directory)
 
 **Scripts (already in the repo):**
-- `interceptor-no-autostart.js` - The interceptor script (used in incremental mode)
-- `graphql-interceptor.js` - Original auto-start version (optional)
+- `interceptor-no-autostart.js` - The interceptor script
 
 ## Benefits
 
@@ -119,7 +118,7 @@ Claude will skip the incremental mode steps and capture everything from scratch.
 
 ### What if the file is in a different location?
 
-Make sure `x-bookmarks-latest.json` is in your project directory (`/Users/howardwu/dev/cc-scrape-x-bookmarks`). Claude automatically looks there.
+Make sure `x-bookmarks-latest.json` is in your project directory. Claude automatically looks there.
 
 If it's somewhere else, either:
 - Copy it to the project directory, or
