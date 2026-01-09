@@ -3,6 +3,19 @@
 // Script to combine all GraphQL bookmark files into a single comprehensive file
 import { execSync } from 'child_process';
 
+// Check if running with bun
+if (typeof Bun === 'undefined') {
+  console.error('❌ Error: This script requires Bun runtime.');
+  console.error('');
+  console.error('📦 Install Bun:');
+  console.error('   curl -fsSL https://bun.sh/install | bash');
+  console.error('   exec $SHELL  # Restart your shell');
+  console.error('');
+  console.error('🚀 Then run:');
+  console.error('   bun combine-bookmarks.ts');
+  process.exit(1);
+}
+
 interface BookmarkData {
   exported_at: string;
   total_bookmarks: number;
@@ -54,12 +67,20 @@ const downloadsDir = process.env.BOOKMARK_FILES_DIR || `${process.env.HOME}/Down
 
 console.log(`📁 Searching for files in: ${downloadsDir}`);
 
-// Find all GraphQL bookmark files
-const findCommand = `find "${downloadsDir}" -name "x-bookmarks-graphql-*.json"`;
+// Find all bookmark files (graphql extractions, combined files, and latest.json)
+const findCommand = `find "${downloadsDir}" \\( -name "x-bookmarks-graphql-*.json" -o -name "x-bookmarks-combined-*.json" -o -name "x-bookmarks-latest.json" \\) -type f`;
 const fileListOutput = execSync(findCommand, { encoding: 'utf8' });
 const files = fileListOutput.trim().split('\n').filter(f => f);
 
-console.log(`📁 Found ${files.length} GraphQL bookmark files`);
+console.log(`📁 Found ${files.length} bookmark file(s)`);
+
+// Safety check: Exit early if no files found
+if (files.length === 0) {
+  console.log('❌ No bookmark files found. Exiting without creating empty files to preserve existing data.');
+  console.log(`💡 Searched in: ${downloadsDir}`);
+  console.log(`💡 Use BOOKMARK_FILES_DIR environment variable to specify a different directory.`);
+  process.exit(0);
+}
 
 // Use Map to deduplicate bookmarks by ID
 const allBookmarks = new Map<string, Bookmark>();
@@ -116,6 +137,11 @@ const combinedData: CombinedData = {
 const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
 const outputPath = `${downloadsDir}/x-bookmarks-combined-${timestamp}.json`;
 
+// Show summary before writing
+console.log('\n📊 Pre-save validation:');
+console.log(`   • Will save: ${uniqueBookmarks.length} unique bookmarks`);
+console.log(`   • Output file: x-bookmarks-combined-${timestamp}.json`);
+
 // Write combined file
 await Bun.write(outputPath, JSON.stringify(combinedData, null, 2));
 
@@ -127,13 +153,48 @@ console.log(`   • Duplicate bookmarks removed: ${totalDuplicates}`);
 console.log(`   • Final unique bookmarks: ${uniqueBookmarks.length}`);
 console.log(`📄 Combined file saved to: ${outputPath}`);
 
-// Also create a latest.json for easy access
+// Also create a latest.json for easy access (with safety checks)
 const latestPath = `${downloadsDir}/x-bookmarks-latest.json`;
-try {
-  await Bun.write(latestPath, JSON.stringify(combinedData, null, 2));
-  console.log(`🔗 Latest file available at: ${latestPath}`);
-} catch (error) {
-  console.warn(`⚠️  Could not create latest file:`, error);
+
+// Safety check 1: Don't overwrite if we have 0 bookmarks
+if (uniqueBookmarks.length === 0) {
+  console.log('⚠️  WARNING: No bookmarks to save. Skipping latest.json update to preserve existing data.');
+} else {
+  try {
+    // Safety check 2: Check if existing latest.json has MORE bookmarks
+    let shouldUpdate = true;
+    const latestFile = Bun.file(latestPath);
+
+    if (await latestFile.exists() && latestFile.size > 0) {
+      const existingContent = await latestFile.text();
+      const existingData = JSON.parse(existingContent);
+      const existingCount = existingData.total_bookmarks || 0;
+
+      if (existingCount > uniqueBookmarks.length) {
+        console.log(`\n⚠️  WARNING: Existing latest.json has ${existingCount} bookmarks, but new file only has ${uniqueBookmarks.length}.`);
+        console.log(`⚠️  This would result in DATA LOSS of ${existingCount - uniqueBookmarks.length} bookmarks. Skipping update.`);
+        console.log(`💡 To force update, manually delete or rename the existing latest.json file.`);
+        shouldUpdate = false;
+
+        // Create a backup just in case
+        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        await Bun.write(backupPath, existingContent);
+        console.log(`📦 Existing file backed up to: ${backupPath}`);
+      } else {
+        // Create backup before updating (existing file will be replaced)
+        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        await Bun.write(backupPath, existingContent);
+        console.log(`📦 Previous version backed up to: ${backupPath}`);
+      }
+    }
+
+    if (shouldUpdate) {
+      await Bun.write(latestPath, JSON.stringify(combinedData, null, 2));
+      console.log(`🔗 Latest file updated at: ${latestPath}`);
+    }
+  } catch (error) {
+    console.warn(`⚠️  Could not update latest file:`, error);
+  }
 }
 
 console.log('\n✨ All done! Your complete bookmark collection is ready.');

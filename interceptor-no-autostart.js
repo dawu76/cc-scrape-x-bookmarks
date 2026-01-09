@@ -5,9 +5,13 @@
 class BookmarkGraphQLInterceptor {
   constructor() {
     this.bookmarks = new Map(); // Use Map to deduplicate by ID
+    this.existingBookmarkIds = new Set(); // Track existing bookmark IDs
     this.isActive = false;
     this.originalXHROpen = null;
     this.logPrefix = '[X-Bookmarks-GraphQL]';
+    this.shouldStopScrolling = false; // Flag to stop auto-scroll when we hit existing bookmarks
+    this.consecutiveExistingCount = 0; // Count consecutive existing bookmarks
+    this.stopThreshold = 5; // Stop after this many consecutive existing bookmarks
   }
 
   log(message, ...args) {
@@ -110,17 +114,43 @@ class BookmarkGraphQLInterceptor {
 
       const json = JSON.parse(responseText);
       const newBookmarks = this.extractBookmarksFromResponse(json);
-      
+
       if (newBookmarks.length > 0) {
-        // Add new bookmarks to our collection
+        let newCount = 0;
+        let existingCount = 0;
+
+        // Check each bookmark against existing IDs
         newBookmarks.forEach(bookmark => {
-          this.bookmarks.set(bookmark.id, bookmark);
+          if (this.existingBookmarkIds.has(bookmark.id)) {
+            existingCount++;
+            this.log(`⏭️  Skipping existing bookmark: ${bookmark.id}`);
+          } else {
+            this.bookmarks.set(bookmark.id, bookmark);
+            newCount++;
+          }
         });
 
-        this.log(`Captured ${newBookmarks.length} bookmarks (total: ${this.bookmarks.size})`);
-        
-        // Trigger storage update
-        this.saveBookmarks();
+        // Update consecutive existing count
+        if (existingCount === newBookmarks.length && newBookmarks.length > 0) {
+          // All bookmarks in this batch already exist
+          this.consecutiveExistingCount++;
+          this.log(`⚠️  All ${newBookmarks.length} bookmarks in this batch already exist (consecutive: ${this.consecutiveExistingCount}/${this.stopThreshold})`);
+
+          if (this.consecutiveExistingCount >= this.stopThreshold) {
+            this.shouldStopScrolling = true;
+            this.log(`🛑 Stopping auto-scroll: encountered ${this.stopThreshold} consecutive batches of existing bookmarks`);
+          }
+        } else if (newCount > 0) {
+          // Reset counter if we found new bookmarks
+          this.consecutiveExistingCount = 0;
+        }
+
+        if (newCount > 0) {
+          this.log(`✅ Captured ${newCount} new bookmarks (${existingCount} already existed, total: ${this.bookmarks.size})`);
+
+          // Trigger storage update only if we have new bookmarks
+          this.saveBookmarks();
+        }
       }
 
     } catch (err) {
@@ -374,6 +404,47 @@ class BookmarkGraphQLInterceptor {
       this.error('Failed to load bookmarks from storage:', err);
     }
   }
+
+  // Load existing bookmarks from a JSON file/object to enable incremental updates
+  loadExistingBookmarks(bookmarksData) {
+    try {
+      if (!bookmarksData) {
+        this.warn('No existing bookmarks data provided');
+        return;
+      }
+
+      // Handle both parsed JSON object and string
+      const data = typeof bookmarksData === 'string' ? JSON.parse(bookmarksData) : bookmarksData;
+
+      if (data.bookmarks && Array.isArray(data.bookmarks)) {
+        // Extract IDs and add to the existing bookmarks set
+        data.bookmarks.forEach(bookmark => {
+          if (bookmark.id) {
+            this.existingBookmarkIds.add(bookmark.id);
+          }
+        });
+
+        this.log(`Loaded ${this.existingBookmarkIds.size} existing bookmark IDs`);
+        this.log('Auto-scroll will stop when encountering bookmarks that already exist');
+      } else {
+        this.warn('Invalid bookmarks data format. Expected {bookmarks: [...]}');
+      }
+    } catch (err) {
+      this.error('Failed to load existing bookmarks:', err);
+    }
+  }
+
+  // Check if auto-scroll should stop
+  shouldStopAutoScroll() {
+    return this.shouldStopScrolling;
+  }
+
+  // Reset the stop flag (useful for manual re-runs)
+  resetStopFlag() {
+    this.shouldStopScrolling = false;
+    this.consecutiveExistingCount = 0;
+    this.log('Reset stop flag - auto-scroll can continue');
+  }
 }
 
 // Create global instance
@@ -382,54 +453,57 @@ window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
 // Auto-scroll functionality
 function startAutoScroll() {
   let scrollCount = 0;
-  const maxScrolls = 50; // Adjust based on bookmark count
-  const scrollDelay = 2000; // 2 seconds between scrolls
-  
+  const maxScrolls = 10000; // Increased limit - will stop when hitting existing bookmarks
+  const scrollDelay = 4000; // 4 seconds between scrolls
+
   function performScroll() {
+    // Check if we should stop due to existing bookmarks
+    if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
+      console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
+      console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
+      return;
+    }
+
     if (scrollCount >= maxScrolls) {
       console.log('🏁 Auto-scroll completed. Reached maximum scroll limit.');
       return;
     }
-    
+
     const currentHeight = document.body.scrollHeight;
     window.scrollTo(0, currentHeight);
     scrollCount++;
-    
+
     console.log(`📜 Auto-scroll ${scrollCount}/${maxScrolls} - Scrolled to: ${currentHeight}`);
-    
+
     // Check if we've reached the bottom (no new content loaded)
     setTimeout(() => {
+      // Check stop flag again before continuing
+      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
+        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
+        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
+        return;
+      }
+
       if (document.body.scrollHeight === currentHeight) {
         console.log('🏁 Auto-scroll completed. Reached bottom of page.');
+        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
         return;
       }
       performScroll();
     }, scrollDelay);
   }
-  
+
   // Start scrolling after initial load
   setTimeout(performScroll, 3000);
 }
 
-// Auto-start if we're on the bookmarks page
-if (window.location.pathname === '/i/bookmarks') {
-  window.bookmarkInterceptor.loadBookmarks();
-  window.bookmarkInterceptor.install();
-  
-  console.log('📚 X Bookmark GraphQL Interceptor started!');
-  console.log('🤖 Auto-scroll will begin in 3 seconds...');
-  console.log('Use window.bookmarkInterceptor for manual control:');
-  console.log('  - .getBookmarkCount() - Get current count');
-  console.log('  - .getAllBookmarks() - Get all captured bookmarks');
-  console.log('  - .saveBookmarks() - Force save/download');
-  console.log('  - .clearBookmarks() - Clear all data');
-  console.log('  - .uninstall() - Stop intercepting');
-  
-  // Start auto-scrolling
-  startAutoScroll();
-}
 
 // Export for module usage
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module \!== 'undefined' && module.exports) {
   module.exports = BookmarkGraphQLInterceptor;
 }
+
+console.log('✅ Interceptor ready\! Use window.bookmarkInterceptor');
+console.log('📖 To load existing bookmarks: Use Claude Code file upload');
+console.log('🚀 To start manually: Call startAutoScroll()');
+

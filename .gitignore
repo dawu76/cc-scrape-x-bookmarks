@@ -1,0 +1,8 @@
+# Ignore the latest bookmarks JSON file
+x-bookmarks-latest.json
+
+# Ignore generated injection script (contains all existing bookmarks)
+injection-script.js
+
+# Ignore playwright MCP output directory (contains all downloaded bookmark files)
+.playwright-mcp/
