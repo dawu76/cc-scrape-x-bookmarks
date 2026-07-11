@@ -153,6 +153,19 @@ The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
 automatically on every run — no copy step is needed. The script refuses to
 shrink the collection and writes a timestamped backup before every update.
 
+To also delete the raw per-batch files and the completion sentinel after a
+successful merge (they are redundant once `x-bookmarks-latest.json` is updated),
+set `CLEANUP_BATCH_FILES=1`:
+
+```bash
+BOOKMARK_FILES_DIR="/path/to/downloads" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
+```
+
+This only runs after a successful, non-shrinking update, and never touches
+`x-bookmarks-latest.json`, combined snapshots, or backups. Recommended for
+resetting the download directory between runs so a stale sentinel from a prior
+run is not re-reported.
+
 ## 📊 What You Get
 
 - **All bookmarks** (not just 5-10 visible ones)

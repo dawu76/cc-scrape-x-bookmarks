@@ -262,6 +262,26 @@ if (uniqueBookmarks.length === 0) {
         unlinkSync(join(outputDir, oldBackup));
         console.log(`🧹 Pruned old backup: ${oldBackup}`);
       }
+
+      // Opt-in: remove the raw per-batch files and the sentinel we just merged.
+      // They are pure intermediates — at this point the canonical latest.json,
+      // a timestamped combined snapshot, and a backup all exist. Scoped to the
+      // download directory and to graphql/DONE names, so the canonical file,
+      // combined snapshots, and backups are never touched.
+      if (process.env.CLEANUP_BATCH_FILES === '1') {
+        const consumable = (name: string) =>
+          /^x-bookmarks-graphql-.*\.json$/.test(name) || /^x-bookmarks-DONE-.*\.json$/.test(name);
+        let removed = 0;
+        for (const f of findFiles(downloadsDir, consumable)) {
+          try {
+            unlinkSync(f);
+            removed++;
+          } catch (err) {
+            console.warn(`⚠️  Could not delete ${f}:`, err);
+          }
+        }
+        console.log(`🧹 CLEANUP_BATCH_FILES=1: deleted ${removed} consumed batch/sentinel file(s) from ${downloadsDir}`);
+      }
     }
   } catch (error) {
     console.warn(`⚠️  Could not update latest file:`, error);

@@ -152,3 +152,44 @@ test("combine flags a stall-reason sentinel for review", () => {
   expect(code).toBe(0);
   expect(output).toContain("STALL");
 });
+
+test("CLEANUP_BATCH_FILES=1 deletes batch and sentinel files after a successful merge", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+  writeFileSync(join(inputDir, "x-bookmarks-DONE-2026-07-11T00-00-00.json"),
+    JSON.stringify({ status: "complete", reason: "done", new_bookmarks: 1, matched_requests: 1, completed_at: "x" }));
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir, CLEANUP_BATCH_FILES: "1" });
+  expect(code).toBe(0);
+
+  const left = require("fs").readdirSync(inputDir);
+  expect(left.filter((f: string) => /^x-bookmarks-graphql-/.test(f)).length).toBe(0);
+  expect(left.filter((f: string) => /^x-bookmarks-DONE-/.test(f)).length).toBe(0);
+});
+
+test("without CLEANUP_BATCH_FILES the raw files are left in place", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+  const left = require("fs").readdirSync(inputDir);
+  expect(left.filter((f: string) => /^x-bookmarks-graphql-/.test(f)).length).toBe(1);
+});
+
+test("cleanup never deletes a canonical latest.json sharing the input directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bm-both-"));
+  // BOOKMARK_FILES_DIR and OUTPUT_DIR are the same directory here
+  writeExport(join(dir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(dir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: dir, OUTPUT_DIR: dir, CLEANUP_BATCH_FILES: "1" });
+  expect(code).toBe(0);
+  const left = require("fs").readdirSync(dir);
+  expect(left).toContain("x-bookmarks-latest.json"); // canonical survives
+  expect(left.filter((f: string) => /^x-bookmarks-graphql-/.test(f)).length).toBe(0);
+});
