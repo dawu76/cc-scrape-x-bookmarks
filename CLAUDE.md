@@ -46,41 +46,29 @@ bun export-seed-ids.ts
 
 #### Primary path: `browser_run_code_unsafe` (loads ALL IDs, one call)
 
-This reads the seed file from disk in the Playwright MCP's Node context and
-pushes it into the page — the IDs never pass through the model, and CDP
-evaluate is not subject to x.com's CSP.
+`bun export-seed-ids.ts` also generated `data/seed-loader.js` — a self-contained
+snippet with every ID inlined. The tool's sandbox has no `require()` and no
+dynamic `import()` (verified 2026-07-11), so the loader is executed from disk
+via the `filename` parameter and the IDs never pass through the model:
 
 ```javascript
 await mcp__playwright__browser_run_code_unsafe({
-  code: `async (page) => {
-    const fs = require('fs');
-    const seed = JSON.parse(fs.readFileSync(
-      '/Users/howardwu/dev/cc-scrape-x-bookmarks/data/seed-ids.json', 'utf8'));
-    await page.evaluate(() => {
-      window.bookmarkInterceptor.existingBookmarkIds.clear();
-    });
-    for (let i = 0; i < seed.ids.length; i += 5000) {
-      const chunk = seed.ids.slice(i, i + 5000);
-      await page.evaluate((ids) => {
-        window.bookmarkInterceptor.loadExistingBookmarks({
-          bookmarks: ids.map(id => ({ id }))
-        });
-      }, chunk);
-    }
-    const size = await page.evaluate(
-      () => window.bookmarkInterceptor.existingBookmarkIds.size);
-    return 'Loaded ' + size + ' of ' + seed.count + ' seed IDs';
-  }`
+  filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/data/seed-loader.js"
 });
 ```
 
-**MANDATORY verification:** the returned string must report `Loaded N of N`
-with both numbers equal to the count printed by `export-seed-ids.ts`. If they
+**Expected:** the tool result exceeds the response token limit (it echoes the
+~650KB loader code) and the harness saves it to a file, reporting the path.
+That is normal. Extract the verification line:
+
+```bash
+grep -o 'Loaded [0-9]* of [0-9]* seed IDs' <saved-output-file>
+```
+
+**MANDATORY verification:** it must print `Loaded N of N seed IDs` with both
+numbers equal to the count printed by `export-seed-ids.ts`. If the numbers
 differ, or the tool errors, DO NOT start scrolling — fall back to the chunked
-path below. Note: the exact `code` signature above matches @playwright/mcp's
-convention of an async function receiving `page`; if the installed MCP version
-rejects it, run the tool once with `code: "async (page) => page.url()"` to
-discover the expected shape, adapt, and update this section.
+path below.
 
 #### Fallback path: chunked `browser_evaluate` (top 5,000 by capture recency)
 

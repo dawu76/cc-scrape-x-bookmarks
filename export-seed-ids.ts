@@ -31,3 +31,22 @@ await Bun.write(outputPath, JSON.stringify({
 }));
 
 console.log(`✅ Wrote ${ids.length} seed IDs to ${outputPath}`);
+
+// Also generate the self-contained loader that browser_run_code_unsafe
+// executes via its `filename` parameter. The tool's sandbox has no require()
+// or dynamic import(), so the IDs are inlined as a literal (verified 2026-07-11).
+const loaderPath = process.argv[4] || './data/seed-loader.js';
+const loader = `async (page) => {
+  const ids = ${JSON.stringify(ids)};
+  await page.evaluate(() => { window.bookmarkInterceptor.existingBookmarkIds.clear(); });
+  for (let i = 0; i < ids.length; i += 5000) {
+    const chunk = ids.slice(i, i + 5000);
+    await page.evaluate((c) => {
+      window.bookmarkInterceptor.loadExistingBookmarks({ bookmarks: c.map(id => ({ id })) });
+    }, chunk);
+  }
+  const size = await page.evaluate(() => window.bookmarkInterceptor.existingBookmarkIds.size);
+  return 'Loaded ' + size + ' of ${ids.length} seed IDs';
+}`;
+await Bun.write(loaderPath, loader);
+console.log(`✅ Wrote seed loader to ${loaderPath}`);
