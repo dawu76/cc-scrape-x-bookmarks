@@ -393,15 +393,14 @@ class BookmarkGraphQLInterceptor {
     }
   }
 
-  // Download bookmarks as JSON file
-  downloadBookmarks(exportData) {
+  // Trigger a browser download of `data` serialized as `filename`.
+  // Returns true on success, false on a caught error. Single source of the
+  // blob -> anchor -> click plumbing shared by every file the interceptor writes.
+  downloadJSON(data, filename) {
     try {
-      const jsonString = JSON.stringify(exportData, null, 2);
+      const jsonString = JSON.stringify(data, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-      const filename = `x-bookmarks-graphql-${timestamp}.json`;
 
       const a = document.createElement('a');
       a.href = url;
@@ -410,13 +409,39 @@ class BookmarkGraphQLInterceptor {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
-      this.log(`Downloaded ${exportData.total_bookmarks} bookmarks to ${filename}`);
       return true;
     } catch (err) {
-      this.error('Failed to download bookmarks:', err);
+      this.error('Failed to download', filename, err);
       return false;
     }
+  }
+
+  // Download the delta buffer as a timestamped batch file.
+  downloadBookmarks(exportData) {
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `x-bookmarks-graphql-${timestamp}.json`;
+    const ok = this.downloadJSON(exportData, filename);
+    if (ok) this.log(`Downloaded ${exportData.total_bookmarks} bookmarks to ${filename}`);
+    return ok;
+  }
+
+  // Write a small completion sentinel so a later combine run (or the operator)
+  // can distinguish a finished run from one that was interrupted (e.g., the
+  // laptop was closed). `reason` is the human-readable stop reason from the
+  // auto-scroll driver — including the watchdog's "Capture stall detected."
+  writeCompletionSentinel(reason) {
+    const sentinel = {
+      status: 'complete',
+      reason,
+      new_bookmarks: this.bookmarks.size,
+      matched_requests: this.matchedRequestCount,
+      completed_at: new Date().toISOString()
+    };
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `x-bookmarks-DONE-${timestamp}.json`;
+    const ok = this.downloadJSON(sentinel, filename);
+    if (ok) this.log(`Wrote completion sentinel ${filename} (reason: ${reason})`);
+    return ok;
   }
 
   // Get current bookmark count
@@ -499,6 +524,7 @@ function startAutoScroll(options = {}) {
     stopped = true;
     console.log(`🏁 Auto-scroll stopped: ${reason}`);
     console.log(`📊 Captured ${interceptor.getBookmarkCount()} new bookmarks.`);
+    interceptor.writeCompletionSentinel(reason);
     onStop(reason);
   }
 

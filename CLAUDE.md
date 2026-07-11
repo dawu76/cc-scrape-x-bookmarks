@@ -239,6 +239,21 @@ await mcp__playwright__browser_evaluate({
 });
 ```
 
+### Verifying a run finished (not interrupted)
+
+Every completed auto-scroll writes one `x-bookmarks-DONE-*.json` sentinel to the
+download directory. To confirm a run finished cleanly rather than being
+interrupted (e.g., the laptop closed):
+
+```bash
+cat "$BOOKMARK_FILES_DIR"/x-bookmarks-DONE-*.json 2>/dev/null | tail -1
+```
+
+- `"reason": "All recent bookmarks already exist in your collection."` → clean incremental stop.
+- `"reason": "Reached bottom of page."` → clean full stop.
+- `"reason": "Capture stall detected."` → the interceptor was likely broken; investigate before trusting the batch.
+- **No sentinel file at all** → the run did not finish; re-run before combining.
+
 ## 🎯 Results
 
 - **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory). Each file holds only the **new** bookmarks from that one batch (~20), not a cumulative snapshot — a full run is tens of MB total, not hundreds. The combine step deduplicates by ID, so overlapping or old cumulative files are harmless.

@@ -31,7 +31,12 @@ function waitFor(getter, timeoutMs = 2000) {
 test("stops with stall reason when no bookmark responses are intercepted", async () => {
   let stopReason = null;
   fakeEnvironment({
-    interceptor: { shouldStopAutoScroll: () => false, getBookmarkCount: () => 0, matchedRequestCount: 0 }
+    interceptor: {
+      shouldStopAutoScroll: () => false,
+      getBookmarkCount: () => 0,
+      matchedRequestCount: 0,
+      writeCompletionSentinel: () => true
+    }
   });
   startAutoScroll({ startDelay: 1, scrollDelay: 1, stallLimit: 3, onStop: (r) => { stopReason = r; } });
   await waitFor(() => stopReason);
@@ -45,10 +50,27 @@ test("stops when interceptor signals all-existing auto-stop", async () => {
     interceptor: {
       shouldStopAutoScroll: () => ++calls > 2, // stops on the 3rd check
       getBookmarkCount: () => 7,
-      matchedRequestCount: 0
+      matchedRequestCount: 0,
+      writeCompletionSentinel: () => true
     }
   });
   startAutoScroll({ startDelay: 1, scrollDelay: 1, stallLimit: 100, onStop: (r) => { stopReason = r; } });
   await waitFor(() => stopReason);
   expect(stopReason).toBe("All recent bookmarks already exist in your collection.");
+});
+
+test("writes a completion sentinel when auto-scroll stops", async () => {
+  let stopReason = null;
+  let sentinelReason = null;
+  fakeEnvironment({
+    interceptor: {
+      shouldStopAutoScroll: () => true,
+      getBookmarkCount: () => 3,
+      matchedRequestCount: 0,
+      writeCompletionSentinel: (r) => { sentinelReason = r; return true; }
+    }
+  });
+  startAutoScroll({ startDelay: 1, scrollDelay: 1, onStop: (r) => { stopReason = r; } });
+  await waitFor(() => stopReason);
+  expect(sentinelReason).toBe(stopReason);
 });
