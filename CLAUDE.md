@@ -35,52 +35,93 @@ await mcp__playwright__browser_evaluate({
 
 ### Step 4: Load Existing Bookmarks (For Incremental Updates)
 
-**Required inputs:**
-- `x-bookmarks-latest.json` file path (absolute path)
+**For first-time extraction: skip this step entirely.**
 
-**Approach:** Extract bookmark IDs from the existing file and inject them directly into the interceptor.
-
-**Important:** For efficiency and to avoid file size/token limits, we only load the **1,000 most recent** bookmark IDs. This is sufficient because:
-- Bookmarks are ordered chronologically (newest first)
-- New bookmarks will be at the top of your feed
-- The auto-stop mechanism (5 consecutive batches of existing bookmarks) handles the rest
+First, regenerate the seed file and note the count it prints:
 
 ```bash
-# Extract the 1,000 most recent bookmark IDs (not all IDs)
-jq -r '.bookmarks[0:1000] | map(.id) | @json' x-bookmarks-latest.json
+bun export-seed-ids.ts
+# ✅ Wrote <COUNT> seed IDs to ./data/seed-ids.json
 ```
 
-Then inject the IDs directly into the browser:
+#### Primary path: `browser_run_code_unsafe` (loads ALL IDs, one call)
+
+This reads the seed file from disk in the Playwright MCP's Node context and
+pushes it into the page — the IDs never pass through the model, and CDP
+evaluate is not subject to x.com's CSP.
 
 ```javascript
-// Load the 1,000 most recent bookmark IDs
-await mcp__playwright__browser_evaluate({
-  function: `() => {
-    const recentIds = BOOKMARK_IDS_ARRAY; // Array of 1000 most recent IDs
-    const bookmarksData = {
-      bookmarks: recentIds.map(id => ({ id: id }))
-    };
-
-    if (window.bookmarkInterceptor) {
+await mcp__playwright__browser_run_code_unsafe({
+  code: `async (page) => {
+    const fs = require('fs');
+    const seed = JSON.parse(fs.readFileSync(
+      '/Users/howardwu/dev/cc-scrape-x-bookmarks/data/seed-ids.json', 'utf8'));
+    await page.evaluate(() => {
       window.bookmarkInterceptor.existingBookmarkIds.clear();
-      window.bookmarkInterceptor.loadExistingBookmarks(bookmarksData);
-      console.log('✅ Existing bookmarks loaded!');
+    });
+    for (let i = 0; i < seed.ids.length; i += 5000) {
+      const chunk = seed.ids.slice(i, i + 5000);
+      await page.evaluate((ids) => {
+        window.bookmarkInterceptor.loadExistingBookmarks({
+          bookmarks: ids.map(id => ({ id }))
+        });
+      }, chunk);
     }
-  }`,
-  element: "Load existing bookmark IDs"
+    const size = await page.evaluate(
+      () => window.bookmarkInterceptor.existingBookmarkIds.size);
+    return 'Loaded ' + size + ' of ' + seed.count + ' seed IDs';
+  }`
 });
 ```
 
-**Note:** Claude Code will handle extracting the IDs and injecting them automatically. You don't need to manually copy-paste the JSON.
+**MANDATORY verification:** the returned string must report `Loaded N of N`
+with both numbers equal to the count printed by `export-seed-ids.ts`. If they
+differ, or the tool errors, DO NOT start scrolling — fall back to the chunked
+path below. Note: the exact `code` signature above matches @playwright/mcp's
+convention of an async function receiving `page`; if the installed MCP version
+rejects it, run the tool once with `code: "async (page) => page.url()"` to
+discover the expected shape, adapt, and update this section.
 
-**Console output:**
-```
-[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
-[X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
-✅ Existing bookmarks loaded!
+#### Fallback path: chunked `browser_evaluate` (top 5,000 by capture recency)
+
+Use only if `browser_run_code_unsafe` is unavailable or failed verification.
+`seed-ids.json` is sorted by `capturedAt` descending, so the first 5,000 IDs
+are the ones most recently seen at the top of the bookmarks feed — NOT the
+top of the timestamp-sorted collection file, which sorts by tweet creation
+date and misses recently-bookmarked old tweets.
+
+```bash
+# Chunk 1 of 2:
+jq -c '.ids[0:2500]' data/seed-ids.json
+# Chunk 2 of 2:
+jq -c '.ids[2500:5000]' data/seed-ids.json
 ```
 
-**For first-time extraction:** Skip this step entirely.
+Inject chunk 1 (clears first), then chunk 2 (accumulates):
+
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    window.bookmarkInterceptor.existingBookmarkIds.clear();
+    window.bookmarkInterceptor.loadExistingBookmarks({
+      bookmarks: CHUNK_1_IDS_ARRAY.map(id => ({ id })) });
+    return 'Set size: ' + window.bookmarkInterceptor.existingBookmarkIds.size;
+  }`,
+  element: "Load seed IDs chunk 1/2"
+});
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    window.bookmarkInterceptor.loadExistingBookmarks({
+      bookmarks: CHUNK_2_IDS_ARRAY.map(id => ({ id })) });
+    return 'Set size: ' + window.bookmarkInterceptor.existingBookmarkIds.size;
+  }`,
+  element: "Load seed IDs chunk 2/2"
+});
+```
+
+**MANDATORY verification:** the final call must return `Set size: 5000` (or
+the total collection size if smaller). A lower number means a chunk was
+dropped or corrupted — re-inject before scrolling.
 
 ### Step 5: Start Auto-Scroll
 
@@ -253,18 +294,20 @@ Press `Ctrl+C` to stop the server when done.
 
 ## 🔧 Troubleshooting
 
-### Why only load 1,000 recent bookmark IDs?
+### Why a seed file instead of injecting IDs from chat?
 
-**Problem**: Loading all bookmark IDs (e.g., 28,000+) causes several issues:
-- File size exceeds browser/tool limits (600KB+ JSON)
-- Token limits in responses (25,000 token max)
-- Slow injection time
+Injecting ~30k IDs (~650KB) through model-generated tool calls is slow,
+expensive (~190k output tokens), and risks transcription errors. The seed file
++ `browser_run_code_unsafe` path moves the data disk→Node→page without the
+model in the loop. The chunked fallback caps at 5,000 IDs to bound token cost;
+it is a heuristic keyed on capture recency, so expect auto-stop to fire
+slightly later than with the full set.
 
-**Solution**: Load only the 1,000 most recent IDs because:
-- Bookmarks are chronologically ordered (newest first)
-- New bookmarks appear at the top of your feed
-- The auto-stop mechanism (5 consecutive batches) handles detection
-- Typical incremental updates are <500 bookmarks
+### Why not fetch the seed file from a local HTTP server?
+
+x.com sends a strict `Content-Security-Policy: connect-src` allowlist that
+does not include localhost. In-page `fetch('http://localhost:...')` is blocked
+by CSP before CORS applies. (Verified 2026-07-11.)
 
 ### Browser Security Restrictions
 
