@@ -324,26 +324,17 @@ class BookmarkGraphQLInterceptor {
     return media;
   }
 
-  // Save bookmarks to storage
+  // Save bookmarks by downloading a JSON snapshot (files on disk are the
+  // durable store; the combine script recovers from partial runs)
   saveBookmarks() {
-    try {
-      const bookmarksList = Array.from(this.bookmarks.values());
-      const exportData = {
-        exported_at: new Date().toISOString(),
-        total_bookmarks: bookmarksList.length,
-        source: 'graphql-interceptor',
-        bookmarks: bookmarksList
-      };
-
-      // Store in localStorage for persistence
-      localStorage.setItem('x-bookmarks-graphql-data', JSON.stringify(exportData));
-      
-      // Also trigger download
-      this.downloadBookmarks(exportData);
-
-    } catch (err) {
-      this.error('Failed to save bookmarks:', err);
-    }
+    const bookmarksList = Array.from(this.bookmarks.values());
+    const exportData = {
+      exported_at: new Date().toISOString(),
+      total_bookmarks: bookmarksList.length,
+      source: 'graphql-interceptor',
+      bookmarks: bookmarksList
+    };
+    this.downloadBookmarks(exportData);
   }
 
   // Download bookmarks as JSON file
@@ -383,26 +374,7 @@ class BookmarkGraphQLInterceptor {
   // Clear all captured bookmarks
   clearBookmarks() {
     this.bookmarks.clear();
-    localStorage.removeItem('x-bookmarks-graphql-data');
     this.log('Cleared all bookmarks');
-  }
-
-  // Load bookmarks from localStorage
-  loadBookmarks() {
-    try {
-      const stored = localStorage.getItem('x-bookmarks-graphql-data');
-      if (stored) {
-        const data = JSON.parse(stored);
-        if (data.bookmarks && Array.isArray(data.bookmarks)) {
-          data.bookmarks.forEach(bookmark => {
-            this.bookmarks.set(bookmark.id, bookmark);
-          });
-          this.log(`Loaded ${this.bookmarks.size} bookmarks from storage`);
-        }
-      }
-    } catch (err) {
-      this.error('Failed to load bookmarks from storage:', err);
-    }
   }
 
   // Load existing bookmarks from a JSON file/object to enable incremental updates
