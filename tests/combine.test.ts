@@ -27,7 +27,9 @@ function runCombine(env: Record<string, string>) {
     cwd: import.meta.dir + "/..",
     env: { ...process.env, ...env }
   });
-  return { stdout: proc.stdout.toString(), code: proc.exitCode };
+  const stdout = proc.stdout.toString();
+  const stderr = proc.stderr.toString();
+  return { stdout, stderr, output: stdout + stderr, code: proc.exitCode };
 }
 
 test("combines into OUTPUT_DIR and merges the canonical latest.json", () => {
@@ -104,4 +106,49 @@ test("prunes latest-backups down to the newest five", () => {
   expect(backups.length).toBe(5); // 7 old + 1 new from this run = 8, pruned to 5
   // the oldest three (01,02,03) must be the ones deleted
   expect(backups[0] > "x-bookmarks-latest-backup-2026-01-03").toBe(true);
+});
+
+test("combine reports the completion sentinel reason when present", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+  writeFileSync(join(inputDir, "x-bookmarks-DONE-2026-07-11T00-00-00.json"), JSON.stringify({
+    status: "complete",
+    reason: "All recent bookmarks already exist in your collection.",
+    new_bookmarks: 1,
+    matched_requests: 3,
+    completed_at: "2026-07-11T00:00:00.000Z"
+  }));
+
+  const { output, code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+  expect(output).toContain("Completion sentinel found");
+  expect(output).toContain("All recent bookmarks already exist");
+});
+
+test("combine warns when no completion sentinel is present", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+
+  const { output, code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+  expect(output).toContain("No completion sentinel");
+});
+
+test("combine flags a stall-reason sentinel for review", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+  writeFileSync(join(inputDir, "x-bookmarks-DONE-2026-07-11T00-00-00.json"), JSON.stringify({
+    status: "complete", reason: "Capture stall detected.", new_bookmarks: 0, matched_requests: 0,
+    completed_at: "2026-07-11T00:00:00.000Z"
+  }));
+
+  const { output, code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+  expect(output).toContain("STALL");
 });

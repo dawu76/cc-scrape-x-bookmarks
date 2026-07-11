@@ -76,33 +76,57 @@ mkdirSync(outputDir, { recursive: true });
 
 console.log(`📁 Searching for files in: ${downloadsDir}`);
 
-// Recursively find bookmark files without shelling out (no quoting pitfalls)
-function findBookmarkFiles(rootDir: string): string[] {
+// Recursively find files under rootDir whose basename satisfies `matches`,
+// without shelling out (no quoting pitfalls). Skips unreadable directories,
+// matching find's tolerance.
+function findFiles(rootDir: string, matches: (name: string) => boolean): string[] {
   const results: string[] = [];
-  const isBookmarkFile = (name: string) =>
-    /^x-bookmarks-graphql-.*\.json$/.test(name) ||
-    /^x-bookmarks-combined-.*\.json$/.test(name) ||
-    name === 'x-bookmarks-latest.json';
   const walk = (dir: string) => {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
-      return; // unreadable directory: skip, matching find's tolerance
+      return;
     }
     for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && isBookmarkFile(entry.name)) results.push(full);
+      else if (entry.isFile() && matches(entry.name)) results.push(full);
     }
   };
   walk(rootDir);
   return results;
 }
 
-const files = findBookmarkFiles(downloadsDir);
+const isBookmarkFile = (name: string) =>
+  /^x-bookmarks-graphql-.*\.json$/.test(name) ||
+  /^x-bookmarks-combined-.*\.json$/.test(name) ||
+  name === 'x-bookmarks-latest.json';
+
+const isSentinelFile = (name: string) => /^x-bookmarks-DONE-.*\.json$/.test(name);
+
+const files = findFiles(downloadsDir, isBookmarkFile);
 
 console.log(`📁 Found ${files.length} bookmark file(s)`);
+
+// Report whether this batch came from a run that finished cleanly. The
+// interceptor writes exactly one x-bookmarks-DONE-*.json per completed run.
+const sentinels = findFiles(downloadsDir, isSentinelFile).sort();
+if (sentinels.length === 0) {
+  console.warn('⚠️  No completion sentinel (x-bookmarks-DONE-*.json) found.');
+  console.warn('   The extraction run may have been interrupted before finishing. Combining anyway.');
+} else {
+  const newest = sentinels[sentinels.length - 1];
+  try {
+    const s = JSON.parse(await Bun.file(newest).text());
+    console.log(`✅ Completion sentinel found: reason="${s.reason}", new_bookmarks=${s.new_bookmarks}, matched_requests=${s.matched_requests}`);
+    if (/stall/i.test(s.reason || '')) {
+      console.warn('⚠️  Run stopped on a capture STALL (interceptor may be broken). Review before trusting this batch.');
+    }
+  } catch (err) {
+    console.warn(`⚠️  Could not read completion sentinel ${newest}:`, err);
+  }
+}
 
 // Always merge the canonical collection so incremental runs never drop history
 const canonicalLatest = resolve(outputDir, 'x-bookmarks-latest.json');
