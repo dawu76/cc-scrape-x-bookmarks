@@ -2,7 +2,7 @@
 
 // Script to combine all GraphQL bookmark files into a single comprehensive file
 import { mkdirSync, readdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 
 // Check if running with bun
 if (typeof Bun === 'undefined') {
@@ -64,7 +64,12 @@ console.log('🔄 Starting bookmark combination process...');
 // - Downloads: `${process.env.HOME}/Downloads`
 // - Playwright temp: `/var/folders/.../playwright-mcp-output`
 // - Current directory: `.`
-const downloadsDir = process.env.BOOKMARK_FILES_DIR || `${process.env.HOME}/Downloads`;
+const downloadsDir = process.env.BOOKMARK_FILES_DIR;
+if (!downloadsDir) {
+  console.error('❌ BOOKMARK_FILES_DIR is required. Set it to the directory containing your bookmark JSON files.');
+  console.error('   Example: BOOKMARK_FILES_DIR=~/Downloads bun combine-bookmarks.ts');
+  process.exit(1);
+}
 
 const outputDir = process.env.OUTPUT_DIR || './data';
 mkdirSync(outputDir, { recursive: true });
@@ -100,8 +105,9 @@ const files = findBookmarkFiles(downloadsDir);
 console.log(`📁 Found ${files.length} bookmark file(s)`);
 
 // Always merge the canonical collection so incremental runs never drop history
-const canonicalLatest = `${outputDir}/x-bookmarks-latest.json`;
-if (await Bun.file(canonicalLatest).exists() && !files.includes(canonicalLatest)) {
+const canonicalLatest = resolve(outputDir, 'x-bookmarks-latest.json');
+const resolvedFiles = files.map(f => resolve(f));
+if (await Bun.file(canonicalLatest).exists() && !resolvedFiles.includes(canonicalLatest)) {
   files.push(canonicalLatest);
 }
 
