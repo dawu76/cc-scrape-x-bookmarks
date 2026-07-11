@@ -8,10 +8,12 @@ class BookmarkGraphQLInterceptor {
     this.existingBookmarkIds = new Set(); // Track existing bookmark IDs
     this.isActive = false;
     this.originalXHROpen = null;
+    this.originalFetch = null;
+    this.matchedRequestCount = 0; // successfully parsed bookmark responses (any transport)
     this.logPrefix = '[X-Bookmarks-GraphQL]';
     this.shouldStopScrolling = false; // Flag to stop auto-scroll when we hit existing bookmarks
-    this.consecutiveExistingCount = 0; // Count consecutive existing bookmarks
-    this.stopThreshold = 5; // Stop after this many consecutive existing bookmarks
+    this.consecutiveExistingCount = 0; // consecutive batches where every bookmark already existed
+    this.stopThreshold = 5; // stop after this many consecutive all-existing batches
   }
 
   log(message, ...args) {
@@ -33,25 +35,31 @@ class BookmarkGraphQLInterceptor {
       return;
     }
 
-    // Store original XMLHttpRequest.open method
-    this.originalXHROpen = XMLHttpRequest.prototype.open;
-    const self = this;
+    if (typeof XMLHttpRequest !== 'undefined') {
+      // Store original XMLHttpRequest.open method
+      this.originalXHROpen = XMLHttpRequest.prototype.open;
+      const self = this;
 
-    // Override XMLHttpRequest.prototype.open
-    XMLHttpRequest.prototype.open = function(method, url, ...args) {
-      // Apply the original open method
-      self.originalXHROpen.apply(this, [method, url, ...args]);
+      // Override XMLHttpRequest.prototype.open
+      XMLHttpRequest.prototype.open = function(method, url, ...args) {
+        // Apply the original open method
+        self.originalXHROpen.apply(this, [method, url, ...args]);
 
-      // Check if this is a bookmark GraphQL request
-      if (self.isBookmarkRequest(url)) {
-        self.log('Detected bookmark GraphQL request:', url);
+        // Check if this is a bookmark GraphQL request
+        if (self.isBookmarkRequest(url)) {
+          self.log('Detected bookmark GraphQL request:', url);
 
-        // Add load event listener to capture response
-        this.addEventListener('load', function() {
-          self.handleBookmarkResponse(this, method, url);
-        });
-      }
-    };
+          // Add load event listener to capture response
+          this.addEventListener('load', function() {
+            self.handleBookmarkResponse(this, method, url);
+          });
+        }
+      };
+    } else {
+      this.warn('XMLHttpRequest not available; skipping XHR hook');
+    }
+
+    this.installFetchHook();
 
     this.isActive = true;
     this.log('GraphQL interceptor installed');
@@ -72,8 +80,46 @@ class BookmarkGraphQLInterceptor {
       this.originalXHROpen = null;
     }
 
+    if (this.originalFetch) {
+      globalThis.fetch = this.originalFetch;
+      this.originalFetch = null;
+    }
+
     this.isActive = false;
     this.log('GraphQL interceptor uninstalled');
+  }
+
+  // Install fetch() hook so capture survives an XHR->fetch migration by X
+  installFetchHook() {
+    if (typeof globalThis.fetch !== 'function') {
+      this.warn('fetch not available; skipping fetch hook');
+      return;
+    }
+    this.originalFetch = globalThis.fetch;
+    const self = this;
+    globalThis.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const resultPromise = self.originalFetch.apply(this, arguments);
+      if (self.isBookmarkRequest(url)) {
+        self.log('Detected bookmark GraphQL request (fetch):', url);
+        resultPromise
+          .then((response) => {
+            if (response.status !== 200) {
+              self.warn(`Non-200 fetch response for ${url}:`, response.status);
+              return;
+            }
+            response
+              .clone()
+              .text()
+              .then((text) => {
+                if (text) self.processResponseText(text, url);
+              })
+              .catch((err) => self.error('Failed to read fetch response body:', err));
+          })
+          .catch(() => { /* network errors belong to the page, not the hook */ });
+      }
+      return resultPromise;
+    };
   }
 
   // Check if the URL is a bookmark GraphQL request
@@ -98,20 +144,23 @@ class BookmarkGraphQLInterceptor {
     }, 1000);
   }
 
-  // Handle bookmark GraphQL response
+  // Handle bookmark GraphQL response (XHR transport)
   handleBookmarkResponse(xhr, method, url) {
+    if (xhr.status !== 200) {
+      this.warn(`Non-200 response for ${url}:`, xhr.status);
+      return;
+    }
+    if (!xhr.responseText) {
+      this.warn('Empty response for', url);
+      return;
+    }
+    this.processResponseText(xhr.responseText, url);
+  }
+
+  // Transport-agnostic: parse one bookmark GraphQL response body
+  processResponseText(responseText, url) {
     try {
-      if (xhr.status !== 200) {
-        this.warn(`Non-200 response for ${url}:`, xhr.status);
-        return;
-      }
-
-      const responseText = xhr.responseText;
-      if (!responseText) {
-        this.warn('Empty response for', url);
-        return;
-      }
-
+      this.matchedRequestCount++;
       const json = JSON.parse(responseText);
       const newBookmarks = this.extractBookmarksFromResponse(json);
 
@@ -156,7 +205,7 @@ class BookmarkGraphQLInterceptor {
     } catch (err) {
       this.error('Failed to parse bookmark response:', err);
       this.error('URL:', url);
-      this.error('Response:', xhr.responseText?.substring(0, 500) + '...');
+      this.error('Response:', responseText?.substring(0, 500) + '...');
     }
   }
 
