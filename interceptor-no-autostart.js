@@ -14,6 +14,7 @@ class BookmarkGraphQLInterceptor {
     this.shouldStopScrolling = false; // Flag to stop auto-scroll when we hit existing bookmarks
     this.consecutiveExistingCount = 0; // consecutive batches where every bookmark already existed
     this.stopThreshold = 5; // stop after this many consecutive all-existing batches
+    this.unsavedBookmarks = []; // delta buffer: new bookmarks not yet written to disk
   }
 
   log(message, ...args) {
@@ -175,6 +176,7 @@ class BookmarkGraphQLInterceptor {
             this.log(`⏭️  Skipping existing bookmark: ${bookmark.id}`);
           } else {
             this.bookmarks.set(bookmark.id, bookmark);
+            this.unsavedBookmarks.push(bookmark);
             newCount++;
           }
         });
@@ -373,17 +375,22 @@ class BookmarkGraphQLInterceptor {
     return media;
   }
 
-  // Save bookmarks by downloading a JSON snapshot (files on disk are the
-  // durable store; the combine script recovers from partial runs)
+  // Save bookmarks by downloading a JSON snapshot of only the bookmarks
+  // captured since the last successful save (a delta). Files on disk are the
+  // durable store; the combine script deduplicates by ID and recovers from
+  // partial runs. The buffer is cleared only when the download succeeds, so a
+  // failed save is retried in the next batch instead of being lost.
   saveBookmarks() {
-    const bookmarksList = Array.from(this.bookmarks.values());
+    if (this.unsavedBookmarks.length === 0) return;
     const exportData = {
       exported_at: new Date().toISOString(),
-      total_bookmarks: bookmarksList.length,
+      total_bookmarks: this.unsavedBookmarks.length,
       source: 'graphql-interceptor',
-      bookmarks: bookmarksList
+      bookmarks: this.unsavedBookmarks
     };
-    this.downloadBookmarks(exportData);
+    if (this.downloadBookmarks(exportData)) {
+      this.unsavedBookmarks = [];
+    }
   }
 
   // Download bookmarks as JSON file
@@ -392,10 +399,10 @@ class BookmarkGraphQLInterceptor {
       const jsonString = JSON.stringify(exportData, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      
+
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
       const filename = `x-bookmarks-graphql-${timestamp}.json`;
-      
+
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -403,10 +410,12 @@ class BookmarkGraphQLInterceptor {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       this.log(`Downloaded ${exportData.total_bookmarks} bookmarks to ${filename}`);
+      return true;
     } catch (err) {
       this.error('Failed to download bookmarks:', err);
+      return false;
     }
   }
 

@@ -241,7 +241,7 @@ await mcp__playwright__browser_evaluate({
 
 ## 🎯 Results
 
-- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory)
+- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory). Each file holds only the **new** bookmarks from that one batch (~20), not a cumulative snapshot — a full run is tens of MB total, not hundreds. The combine step deduplicates by ID, so overlapping or old cumulative files are harmless.
 - **Canonical collection**: `data/x-bookmarks-latest.json` (merged by Step 8)
 - **Combined outputs**: `data/x-bookmarks-combined-*.json` (full merged snapshots, one per run)
 - **Backups**: `data/x-bookmarks-latest-backup-*.json` (written before every update; 5 newest kept automatically)
