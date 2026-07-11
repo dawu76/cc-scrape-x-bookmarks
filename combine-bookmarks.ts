@@ -2,6 +2,7 @@
 
 // Script to combine all GraphQL bookmark files into a single comprehensive file
 import { execSync } from 'child_process';
+import { mkdirSync } from 'fs';
 
 // Check if running with bun
 if (typeof Bun === 'undefined') {
@@ -65,6 +66,9 @@ console.log('🔄 Starting bookmark combination process...');
 // - Current directory: `.`
 const downloadsDir = process.env.BOOKMARK_FILES_DIR || `${process.env.HOME}/Downloads`;
 
+const outputDir = process.env.OUTPUT_DIR || './data';
+mkdirSync(outputDir, { recursive: true });
+
 console.log(`📁 Searching for files in: ${downloadsDir}`);
 
 // Find all bookmark files (graphql extractions, combined files, and latest.json)
@@ -73,6 +77,12 @@ const fileListOutput = execSync(findCommand, { encoding: 'utf8' });
 const files = fileListOutput.trim().split('\n').filter(f => f);
 
 console.log(`📁 Found ${files.length} bookmark file(s)`);
+
+// Always merge the canonical collection so incremental runs never drop history
+const canonicalLatest = `${outputDir}/x-bookmarks-latest.json`;
+if (await Bun.file(canonicalLatest).exists() && !files.includes(canonicalLatest)) {
+  files.push(canonicalLatest);
+}
 
 // Safety check: Exit early if no files found
 if (files.length === 0) {
@@ -135,7 +145,7 @@ const combinedData: CombinedData = {
 
 // Generate timestamp for filename
 const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-const outputPath = `${downloadsDir}/x-bookmarks-combined-${timestamp}.json`;
+const outputPath = `${outputDir}/x-bookmarks-combined-${timestamp}.json`;
 
 // Show summary before writing
 console.log('\n📊 Pre-save validation:');
@@ -154,7 +164,7 @@ console.log(`   • Final unique bookmarks: ${uniqueBookmarks.length}`);
 console.log(`📄 Combined file saved to: ${outputPath}`);
 
 // Also create a latest.json for easy access (with safety checks)
-const latestPath = `${downloadsDir}/x-bookmarks-latest.json`;
+const latestPath = `${outputDir}/x-bookmarks-latest.json`;
 
 // Safety check 1: Don't overwrite if we have 0 bookmarks
 if (uniqueBookmarks.length === 0) {
@@ -177,12 +187,12 @@ if (uniqueBookmarks.length === 0) {
         shouldUpdate = false;
 
         // Create a backup just in case
-        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        const backupPath = `${outputDir}/x-bookmarks-latest-backup-${timestamp}.json`;
         await Bun.write(backupPath, existingContent);
         console.log(`📦 Existing file backed up to: ${backupPath}`);
       } else {
         // Create backup before updating (existing file will be replaced)
-        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        const backupPath = `${outputDir}/x-bookmarks-latest-backup-${timestamp}.json`;
         await Bun.write(backupPath, existingContent);
         console.log(`📦 Previous version backed up to: ${backupPath}`);
       }

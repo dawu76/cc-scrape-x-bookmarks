@@ -112,21 +112,17 @@ await mcp__playwright__browser_evaluate({
 
 **Note:** This returns a simple string to avoid response size limits. Complex objects can exceed token limits.
 
-### Step 8: Combine All Files (Optional)
-```bash
-# Files are auto-downloaded to Downloads folder
-# Combine them if you have multiple extraction runs
-BOOKMARK_FILES_DIR="~/Downloads" bun combine-bookmarks.ts
+### Step 8: Combine All Files
 
-# Or specify custom Playwright output directory
-BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmarks.ts
+```bash
+# Input: directory where the browser saved x-bookmarks-graphql-*.json downloads
+# (check the Playwright session's download location). Output always goes to ./data/.
+BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookmarks.ts
 ```
 
-### Step 9: Copy to Current Directory
-```bash
-# Copy the latest combined file back to project
-cp ~/Downloads/x-bookmarks-latest.json ./
-```
+The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
+automatically on every run — no copy step is needed. The script refuses to
+shrink the collection and writes a timestamped backup before every update.
 
 ## 📊 What You Get
 

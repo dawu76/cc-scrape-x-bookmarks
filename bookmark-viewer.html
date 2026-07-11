@@ -469,7 +469,7 @@
         let financialVisible = true;
 
         // Load bookmarks
-        fetch('x-bookmarks-latest.json')
+        fetch('data/x-bookmarks-latest.json')
             .then(response => response.json())
             .then(data => {
                 allBookmarks = data.bookmarks;
@@ -478,7 +478,7 @@
             })
             .catch(error => {
                 document.getElementById('bookmarksContainer').innerHTML =
-                    '<div class="no-results">Error loading bookmarks. Make sure x-bookmarks-latest.json is in the same directory.</div>';
+                    '<div class="no-results">Error loading bookmarks. Make sure data/x-bookmarks-latest.json exists (run: bun combine-bookmarks.ts).</div>';
                 console.error('Error:', error);
             });
 

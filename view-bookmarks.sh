@@ -1,6 +1,11 @@
 #!/bin/bash
 # Start local web server and open bookmark viewer
 
+if lsof -i :8080 >/dev/null 2>&1; then
+  echo "❌ Port 8080 is already in use. Stop the other process first (lsof -i :8080)."
+  exit 1
+fi
+
 echo "🚀 Starting local web server on port 8080..."
 python3 -m http.server 8080 > /dev/null 2>&1 &
 SERVER_PID=$!

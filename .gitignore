@@ -1,4 +1,5 @@
-# Ignore the latest bookmarks JSON file
+# Canonical bookmark data and derived artifacts (large, personal)
+data/
 x-bookmarks-latest.json
 
 # Ignore generated injection script (contains all existing bookmarks)
