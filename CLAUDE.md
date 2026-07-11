@@ -4,7 +4,7 @@
 
 ## 🔄 Incremental Updates (Recommended!)
 
-If you already have `x-bookmarks-latest.json`, you can capture only **new** bookmarks:
+If you already have `data/x-bookmarks-latest.json`, you can capture only **new** bookmarks:
 
 **Benefits:**
 - Only captures NEW bookmarks you haven't saved yet
@@ -164,17 +164,7 @@ shrink the collection and writes a timestamped backup before every update.
 
 ## 🔄 Combine Multiple Files (Optional)
 
-After extraction, combine all files into one:
-
-```bash
-# Run the combination script (searches ~/Downloads by default)
-bun combine-bookmarks.ts
-
-# Or specify a custom directory where your files are located
-BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmarks.ts
-```
-
-**Tip**: Use the JavaScript evaluation above to find your exact file location, then set `BOOKMARK_FILES_DIR` to that path.
+See Step 8 above — `BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookmarks.ts` writes output to `./data/`. No default search path; you must supply the directory where the browser saved the `x-bookmarks-graphql-*.json` files.
 
 ## 📋 Console Output Example
 
@@ -195,7 +185,7 @@ BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmark
 ```
 ✅ Interceptor ready! Use window.bookmarkInterceptor
 [X-Bookmarks-GraphQL] GraphQL interceptor installed
-[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
+[X-Bookmarks-GraphQL] Loaded 30221 existing bookmark IDs
 [X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
 ✅ Existing bookmarks loaded!
 
@@ -229,10 +219,12 @@ window.bookmarkInterceptor.saveBookmarks()
 
 ## 📂 Finding Your Downloaded Files
 
-Files are typically auto-downloaded to one of these locations:
+Raw extraction files (`x-bookmarks-graphql-*.json`) are auto-downloaded to the Playwright session's download directory. Common locations:
 - `.playwright-mcp/` directory in your project
 - `~/Downloads/` folder
 - `/var/folders/.../playwright-mcp-output/` (temporary directory)
+
+Pass that path to Step 8 (`BOOKMARK_FILES_DIR="..."`) to merge them into `data/x-bookmarks-latest.json`.
 
 To check progress during extraction:
 
@@ -247,13 +239,11 @@ await mcp__playwright__browser_evaluate({
 });
 ```
 
-**Note**: Use the appropriate directory path in `BOOKMARK_FILES_DIR` when running the combine script.
-
 ## 🎯 Results
 
-- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves)
-- **Combined file**: `x-bookmarks-combined-*.json` (all bookmarks in one file)
-- **Latest file**: `x-bookmarks-latest.json` (easy access to most recent)
+- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory)
+- **Canonical collection**: `data/x-bookmarks-latest.json` (merged by Step 8)
+- **Backups**: `data/x-bookmarks-combined-*.json` (5 newest kept automatically)
 
 **Perfect for**: Backing up bookmarks, data analysis, building personal tools, archiving collections.
 
@@ -268,7 +258,7 @@ After extraction and combining, view your bookmarks in an interactive interface:
 This will:
 1. Start a local Python web server on port 8080
 2. Open the bookmark viewer in your browser
-3. Load your `x-bookmarks-latest.json` file
+3. Load your `data/x-bookmarks-latest.json` file
 
 **Features:**
 - Advanced search with AND/OR operators, exclusions, exact phrases
