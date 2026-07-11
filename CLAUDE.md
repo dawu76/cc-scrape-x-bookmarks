@@ -82,52 +82,18 @@ await mcp__playwright__browser_evaluate({
 
 **For first-time extraction:** Skip this step entirely.
 
-### Step 5: Start Auto-Scroll Manually
+### Step 5: Start Auto-Scroll
+
+The scroll loop lives in `interceptor-no-autostart.js` (`startAutoScroll`). Do not paste a copy of the loop here — just invoke it:
+
 ```javascript
 await mcp__playwright__browser_evaluate({
-  function: `() => {
-    let scrollCount = 0;
-    const maxScrolls = 10000;
-    const scrollDelay = 4000;
-
-    function performScroll() {
-      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
-        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-        return;
-      }
-      if (scrollCount >= maxScrolls) {
-        console.log('🏁 Auto-scroll stopped: Maximum scroll limit reached.');
-        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} bookmarks.\`);
-        return;
-      }
-
-      const currentHeight = document.body.scrollHeight;
-      window.scrollTo(0, currentHeight);
-      scrollCount++;
-      console.log(\`📜 Auto-scroll \${scrollCount}/\${maxScrolls} - Scrolled to: \${currentHeight}\`);
-
-      setTimeout(() => {
-        if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-          console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
-          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-          return;
-        }
-        if (document.body.scrollHeight === currentHeight) {
-          console.log('🏁 Auto-scroll completed. Reached bottom of page.');
-          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-          return;
-        }
-        performScroll();
-      }, scrollDelay);
-    }
-
-    console.log('🚀 Starting auto-scroll in 3 seconds...');
-    setTimeout(performScroll, 3000);
-  }`,
-  element: "Start auto-scroll function"
+  function: `() => { startAutoScroll(); return 'auto-scroll started'; }`,
+  element: "Start auto-scroll"
 });
 ```
+
+It stops automatically when: (a) 5 consecutive batches contain only existing bookmarks (incremental mode), (b) the bottom of the page is reached, (c) the max scroll limit is hit, or (d) **watchdog**: 10 scrolls pass with zero intercepted bookmark responses — which means the interceptor is broken and the run must be investigated, not retried blindly.
 
 ### Step 6: Monitor Auto-Extraction
 The system auto-scrolls and captures bookmarks. Monitor progress via console messages.

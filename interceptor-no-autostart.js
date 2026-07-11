@@ -468,51 +468,71 @@ class BookmarkGraphQLInterceptor {
   }
 }
 
-// Auto-scroll functionality
-function startAutoScroll() {
+// Auto-scroll driver. Single source of truth — CLAUDE.md Step 5 calls this;
+// do not paste a copy of this loop into documentation.
+function startAutoScroll(options = {}) {
+  const maxScrolls = options.maxScrolls || 10000;
+  const scrollDelay = options.scrollDelay || 4000;
+  const startDelay = options.startDelay || 3000;
+  // Watchdog: if this many scrolls pass without a single intercepted bookmark
+  // response, the interceptor is likely broken (e.g., X changed its API).
+  const stallLimit = options.stallLimit || 10;
+  const onStop = options.onStop || function () {};
+
+  const interceptor = window.bookmarkInterceptor;
   let scrollCount = 0;
-  const maxScrolls = 10000; // Increased limit - will stop when hitting existing bookmarks
-  const scrollDelay = 4000; // 4 seconds between scrolls
+  let lastMatchedCount = interceptor.matchedRequestCount;
+  let stalledScrolls = 0;
+  let stopped = false;
+
+  function finish(reason) {
+    if (stopped) return;
+    stopped = true;
+    console.log(`🏁 Auto-scroll stopped: ${reason}`);
+    console.log(`📊 Captured ${interceptor.getBookmarkCount()} new bookmarks.`);
+    onStop(reason);
+  }
 
   function performScroll() {
-    // Check if we should stop due to existing bookmarks
-    if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-      console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
-      console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-      return;
+    if (interceptor.shouldStopAutoScroll()) {
+      return finish('All recent bookmarks already exist in your collection.');
+    }
+    if (scrollCount >= maxScrolls) {
+      return finish('Maximum scroll limit reached.');
     }
 
-    if (scrollCount >= maxScrolls) {
-      console.log('🏁 Auto-scroll completed. Reached maximum scroll limit.');
-      return;
+    if (interceptor.matchedRequestCount === lastMatchedCount) {
+      stalledScrolls++;
+      if (stalledScrolls >= stallLimit) {
+        console.error(
+          `🛑 No bookmark API responses intercepted in the last ${stallLimit} scrolls. ` +
+          `The interceptor may be broken (X may have changed its API). Stopping.`
+        );
+        return finish('Capture stall detected.');
+      }
+    } else {
+      stalledScrolls = 0;
+      lastMatchedCount = interceptor.matchedRequestCount;
     }
 
     const currentHeight = document.body.scrollHeight;
     window.scrollTo(0, currentHeight);
     scrollCount++;
-
     console.log(`📜 Auto-scroll ${scrollCount}/${maxScrolls} - Scrolled to: ${currentHeight}`);
 
-    // Check if we've reached the bottom (no new content loaded)
     setTimeout(() => {
-      // Check stop flag again before continuing
-      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
-        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-        return;
+      if (interceptor.shouldStopAutoScroll()) {
+        return finish('All recent bookmarks already exist in your collection.');
       }
-
       if (document.body.scrollHeight === currentHeight) {
-        console.log('🏁 Auto-scroll completed. Reached bottom of page.');
-        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-        return;
+        return finish('Reached bottom of page.');
       }
       performScroll();
     }, scrollDelay);
   }
 
-  // Start scrolling after initial load
-  setTimeout(performScroll, 3000);
+  console.log(`🚀 Starting auto-scroll in ${startDelay / 1000} seconds...`);
+  setTimeout(performScroll, startDelay);
 }
 
 // Create global instance (browser injection context only)
