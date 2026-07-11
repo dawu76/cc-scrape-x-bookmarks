@@ -447,9 +447,6 @@ class BookmarkGraphQLInterceptor {
   }
 }
 
-// Create global instance
-window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
-
 // Auto-scroll functionality
 function startAutoScroll() {
   let scrollCount = 0;
@@ -497,13 +494,16 @@ function startAutoScroll() {
   setTimeout(performScroll, 3000);
 }
 
-
-// Export for module usage
-if (typeof module \!== 'undefined' && module.exports) {
-  module.exports = BookmarkGraphQLInterceptor;
+// Create global instance (browser injection context only)
+if (typeof window !== 'undefined') {
+  window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
+  window.startAutoScroll = startAutoScroll;
+  console.log('✅ Interceptor ready! Use window.bookmarkInterceptor');
+  console.log('🚀 To start auto-scroll: call startAutoScroll()');
 }
 
-console.log('✅ Interceptor ready\! Use window.bookmarkInterceptor');
-console.log('📖 To load existing bookmarks: Use Claude Code file upload');
-console.log('🚀 To start manually: Call startAutoScroll()');
+// Export for Node/Bun test usage (no-op in the browser)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { BookmarkGraphQLInterceptor, startAutoScroll };
+}
 
