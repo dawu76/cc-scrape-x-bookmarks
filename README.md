@@ -59,7 +59,8 @@ Already extracted your bookmarks? The system can capture **only new bookmarks**.
 
 - `x-bookmarks-graphql-*.json` - Individual extraction files (written to the browser download directory)
 - `data/x-bookmarks-latest.json` - Canonical collection (merged automatically by `bun combine-bookmarks.ts`)
-- `data/x-bookmarks-combined-*.json` - Timestamped backups (5 newest kept)
+- `data/x-bookmarks-combined-*.json` - Full merged snapshots, one per combine run
+- `data/x-bookmarks-latest-backup-*.json` - Backups written before each update (5 newest kept)
 
 To combine after extraction (see Step 8 in CLAUDE.md):
 ```bash

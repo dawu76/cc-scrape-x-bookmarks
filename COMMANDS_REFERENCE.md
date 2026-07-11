@@ -4,7 +4,7 @@
 > supplementary one-liners; if it disagrees with CLAUDE.md, CLAUDE.md wins.
 
 This document contains supplementary shell commands for working with bookmark data.
-`OUTPUT_DIR` defaults to `./data`; canonical data lives at `data/data/x-bookmarks-latest.json`.
+`OUTPUT_DIR` defaults to `./data`; canonical data lives at `data/x-bookmarks-latest.json`.
 
 ## Working with Bookmark Data
 
@@ -165,8 +165,8 @@ gh pr create --title "Add financial analysis features" --body "Description of ch
 # Remove all downloaded bookmark files
 rm ~/.playwright-mcp/x-bookmarks-graphql-*.json
 
-# Remove local copy (if too large to commit)
-rm data/x-bookmarks-latest.json
+# ⚠️ NEVER delete data/x-bookmarks-latest.json — it is the canonical and only
+# copy of the collection. It is already git-ignored; there is nothing to clean.
 ```
 
 ### Checking .gitignore

@@ -243,7 +243,8 @@ await mcp__playwright__browser_evaluate({
 
 - **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory)
 - **Canonical collection**: `data/x-bookmarks-latest.json` (merged by Step 8)
-- **Backups**: `data/x-bookmarks-combined-*.json` (5 newest kept automatically)
+- **Combined outputs**: `data/x-bookmarks-combined-*.json` (full merged snapshots, one per run)
+- **Backups**: `data/x-bookmarks-latest-backup-*.json` (written before every update; 5 newest kept automatically)
 
 **Perfect for**: Backing up bookmarks, data analysis, building personal tools, archiving collections.
 
