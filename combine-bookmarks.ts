@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 // Script to combine all GraphQL bookmark files into a single comprehensive file
-import { execSync } from 'child_process';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readdirSync, unlinkSync } from 'fs';
+import { join } from 'path';
 
 // Check if running with bun
 if (typeof Bun === 'undefined') {
@@ -71,10 +71,31 @@ mkdirSync(outputDir, { recursive: true });
 
 console.log(`📁 Searching for files in: ${downloadsDir}`);
 
-// Find all bookmark files (graphql extractions, combined files, and latest.json)
-const findCommand = `find "${downloadsDir}" \\( -name "x-bookmarks-graphql-*.json" -o -name "x-bookmarks-combined-*.json" -o -name "x-bookmarks-latest.json" \\) -type f`;
-const fileListOutput = execSync(findCommand, { encoding: 'utf8' });
-const files = fileListOutput.trim().split('\n').filter(f => f);
+// Recursively find bookmark files without shelling out (no quoting pitfalls)
+function findBookmarkFiles(rootDir: string): string[] {
+  const results: string[] = [];
+  const isBookmarkFile = (name: string) =>
+    /^x-bookmarks-graphql-.*\.json$/.test(name) ||
+    /^x-bookmarks-combined-.*\.json$/.test(name) ||
+    name === 'x-bookmarks-latest.json';
+  const walk = (dir: string) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory: skip, matching find's tolerance
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && isBookmarkFile(entry.name)) results.push(full);
+    }
+  };
+  walk(rootDir);
+  return results;
+}
+
+const files = findBookmarkFiles(downloadsDir);
 
 console.log(`📁 Found ${files.length} bookmark file(s)`);
 
@@ -201,6 +222,16 @@ if (uniqueBookmarks.length === 0) {
     if (shouldUpdate) {
       await Bun.write(latestPath, JSON.stringify(combinedData, null, 2));
       console.log(`🔗 Latest file updated at: ${latestPath}`);
+
+      // Retention: keep only the 5 newest latest-backups (ISO names sort chronologically)
+      const BACKUPS_TO_KEEP = 5;
+      const backups = readdirSync(outputDir)
+        .filter((f) => /^x-bookmarks-latest-backup-.*\.json$/.test(f))
+        .sort();
+      for (const oldBackup of backups.slice(0, Math.max(0, backups.length - BACKUPS_TO_KEEP))) {
+        unlinkSync(join(outputDir, oldBackup));
+        console.log(`🧹 Pruned old backup: ${oldBackup}`);
+      }
     }
   } catch (error) {
     console.warn(`⚠️  Could not update latest file:`, error);

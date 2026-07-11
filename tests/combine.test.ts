@@ -69,3 +69,39 @@ test("canonical latest.json is always merged as input, so history never shrinks"
     .filter((f: string) => f.startsWith("x-bookmarks-latest-backup-"));
   expect(backups.length).toBe(1);
 });
+
+test("discovers bookmark files in nested directories without shelling out", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  const nested = join(inputDir, "session-abc", "downloads");
+  mkdirSync(nested, { recursive: true });
+  writeExport(join(nested, "x-bookmarks-graphql-a.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-b.json"), [bookmark("2", "2026-01-02T00:00:00.000Z")]);
+  // must be ignored: wrong names
+  writeFileSync(join(inputDir, "x-bookmarks-latest-backup-2026.json"), "{}");
+  writeFileSync(join(inputDir, "notes.json"), "{}");
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+  const latest = JSON.parse(readFileSync(join(outputDir, "x-bookmarks-latest.json"), "utf8"));
+  expect(latest.total_bookmarks).toBe(2);
+});
+
+test("prunes latest-backups down to the newest five", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  for (let d = 1; d <= 7; d++) {
+    writeFileSync(join(outputDir, `x-bookmarks-latest-backup-2026-01-0${d}T00-00-00.json`), "{}");
+  }
+  writeExport(join(inputDir, "x-bookmarks-graphql-new.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+
+  const backups = require("fs").readdirSync(outputDir)
+    .filter((f: string) => f.startsWith("x-bookmarks-latest-backup-")).sort();
+  expect(backups.length).toBe(5); // 7 old + 1 new from this run = 8, pruned to 5
+  // the oldest three (01,02,03) must be the ones deleted
+  expect(backups[0] > "x-bookmarks-latest-backup-2026-01-03").toBe(true);
+});
