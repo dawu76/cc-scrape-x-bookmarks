@@ -33,6 +33,19 @@ await mcp__playwright__browser_evaluate({
 });
 ```
 
+Injecting only runs the constructor — it does **not** hook `XMLHttpRequest`/`fetch`.
+You must call `install()` separately, or auto-scroll will run with zero captures
+and eventually trip the watchdog:
+
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => { window.bookmarkInterceptor.install(); return 'isActive: ' + window.bookmarkInterceptor.isActive; }`,
+  element: "Install GraphQL interceptor hooks"
+});
+```
+
+**MANDATORY verification:** must return `isActive: true` before proceeding to Step 4.
+
 ### Step 4: Load Existing Bookmarks (For Incremental Updates)
 
 **For first-time extraction: skip this step entirely.**
