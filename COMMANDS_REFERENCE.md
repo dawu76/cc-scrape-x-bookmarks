@@ -1,71 +1,10 @@
 # Command Reference: X Bookmarks Extraction & Analysis
 
-This document contains all the shell commands used during the bookmark extraction and analysis process.
+> **Workflow commands live in [CLAUDE.md](CLAUDE.md).** This file holds only
+> supplementary one-liners; if it disagrees with CLAUDE.md, CLAUDE.md wins.
 
-## Initial Setup
-
-```bash
-# Navigate to project directory
-cd /path/to/cc-scrape-x-bookmarks
-```
-
-## Bookmark Extraction Process
-
-### Finding Downloaded Bookmark Files
-
-```bash
-# Check Playwright download directory
-ls -lh ~/.playwright-mcp/
-```
-
-### Managing Bookmark Files
-
-```bash
-# List all bookmark files sorted by modification time (newest first)
-ls -lt ~/.playwright-mcp/x-bookmarks-graphql-*.json
-
-# List only the 3 most recent files
-ls -t ~/.playwright-mcp/x-bookmarks-graphql-*.json | head -3
-
-# Count total number of bookmark files
-ls ~/.playwright-mcp/x-bookmarks-graphql-*.json | wc -l
-
-# Check disk space usage of bookmark directory
-du -sh ~/.playwright-mcp/
-```
-
-### Deleting Old Bookmark Files
-
-```bash
-# Keep only the 3 most recent files, delete the rest
-# Step 1: List files to delete (all except newest 3)
-ls -t1 ~/.playwright-mcp/x-bookmarks-graphql-*.json | tail -n +4
-
-# Step 2: Delete old files (keep newest 3)
-ls -t1 ~/.playwright-mcp/x-bookmarks-graphql-*.json | tail -n +4 | xargs -I {} rm {}
-
-# Alternative: Delete all but the most recent file
-ls -t1 ~/.playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs -I {} rm {}
-```
-
-**Note on the deletion command:**
-- `ls -t1` - List files by modification time, one per line
-- `tail -n +4` - Skip first 3 lines (keeps newest 3 files)
-- `xargs -I {}` - Pass each filename to rm command
-- `rm {}` - Delete the file
-
-### Copying Final Bookmark File
-
-```bash
-# Find the most recent bookmark file
-ls -t ~/.playwright-mcp/x-bookmarks-graphql-*.json | head -1
-
-# Copy most recent file to project directory
-cp $(ls -t ~/.playwright-mcp/x-bookmarks-graphql-*.json | head -1) ./x-bookmarks-latest.json
-
-# Verify the file size
-ls -lh x-bookmarks-latest.json
-```
+This document contains supplementary shell commands for working with bookmark data.
+`OUTPUT_DIR` defaults to `./data`; canonical data lives at `data/x-bookmarks-latest.json`.
 
 ## Working with Bookmark Data
 
@@ -73,31 +12,31 @@ ls -lh x-bookmarks-latest.json
 
 ```bash
 # Count total bookmarks
-jq '.total_bookmarks' x-bookmarks-latest.json
+jq '.total_bookmarks' data/x-bookmarks-latest.json
 
 # View export metadata
-jq '.exported_at, .total_bookmarks, .source' x-bookmarks-latest.json
+jq '.exported_at, .total_bookmarks, .source' data/x-bookmarks-latest.json
 
 # Get first bookmark (pretty printed)
-jq '.bookmarks[0]' x-bookmarks-latest.json
+jq '.bookmarks[0]' data/x-bookmarks-latest.json
 
 # Extract all bookmark URLs
-jq '.bookmarks[].url' x-bookmarks-latest.json
+jq '.bookmarks[].url' data/x-bookmarks-latest.json
 
 # Get bookmarks from a specific user
-jq '.bookmarks[] | select(.username == "elonmusk")' x-bookmarks-latest.json
+jq '.bookmarks[] | select(.username == "elonmusk")' data/x-bookmarks-latest.json
 
 # Count bookmarks by year
-jq '.bookmarks | group_by(.timestamp[:4]) | map({year: .[0].timestamp[:4], count: length})' x-bookmarks-latest.json
+jq '.bookmarks | group_by(.timestamp[:4]) | map({year: .[0].timestamp[:4], count: length})' data/x-bookmarks-latest.json
 
 # Find most liked bookmarks (top 10)
-jq '.bookmarks | sort_by(-.metrics.likes) | .[0:10] | .[] | {username, likes: .metrics.likes, text: .text[:100]}' x-bookmarks-latest.json
+jq '.bookmarks | sort_by(-.metrics.likes) | .[0:10] | .[] | {username, likes: .metrics.likes, text: .text[:100]}' data/x-bookmarks-latest.json
 
 # Count bookmarks with media
-jq '[.bookmarks[] | select(.media | length > 0)] | length' x-bookmarks-latest.json
+jq '[.bookmarks[] | select(.media | length > 0)] | length' data/x-bookmarks-latest.json
 
 # Get date range of bookmarks
-jq '[.bookmarks[].timestamp] | min, max' x-bookmarks-latest.json
+jq '[.bookmarks[].timestamp] | min, max' data/x-bookmarks-latest.json
 ```
 
 ## Setting Up the Bookmark Viewer
@@ -224,10 +163,10 @@ gh pr create --title "Add financial analysis features" --body "Description of ch
 
 ```bash
 # Remove all downloaded bookmark files
-rm ~/.playwright-mcp/x-bookmarks-graphql-*.json
+rm .playwright-mcp/x-bookmarks-graphql-*.json
 
-# Remove local copy (if too large to commit)
-rm x-bookmarks-latest.json
+# ⚠️ NEVER delete data/x-bookmarks-latest.json — it is the canonical and only
+# copy of the collection. It is already git-ignored; there is nothing to clean.
 ```
 
 ### Checking .gitignore
@@ -237,7 +176,7 @@ rm x-bookmarks-latest.json
 cat .gitignore
 
 # Add files to .gitignore
-echo "x-bookmarks-latest.json" >> .gitignore
+echo "data/x-bookmarks-latest.json" >> .gitignore
 echo "*.json" >> .gitignore
 echo "node_modules/" >> .gitignore
 ```
@@ -271,24 +210,24 @@ alias serve='python3 -m http.server 8000'
 ```bash
 # Create a backup before deleting files
 mkdir -p ~/backups/bookmarks-$(date +%Y%m%d)
-cp ~/.playwright-mcp/x-bookmarks-graphql-*.json ~/backups/bookmarks-$(date +%Y%m%d)/
+cp .playwright-mcp/x-bookmarks-graphql-*.json ~/backups/bookmarks-$(date +%Y%m%d)/
 ```
 
 ### Find Files by Date
 
 ```bash
 # Find bookmark files modified in last 24 hours
-find ~/.playwright-mcp -name "x-bookmarks-graphql-*.json" -mtime -1
+find .playwright-mcp -name "x-bookmarks-graphql-*.json" -mtime -1
 
 # Find files larger than 10MB
-find ~/.playwright-mcp -name "*.json" -size +10M
+find .playwright-mcp -name "*.json" -size +10M
 ```
 
 ### Compress Old Bookmark Files
 
 ```bash
 # Compress all but the latest file
-ls -t ~/.playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs tar -czf bookmarks-archive.tar.gz
+ls -t .playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs tar -czf bookmarks-archive.tar.gz
 
 # Extract compressed archive
 tar -xzf bookmarks-archive.tar.gz
@@ -300,7 +239,7 @@ tar -xzf bookmarks-archive.tar.gz
 
 ```bash
 # If you get permission denied
-sudo chown -R $USER:$USER ~/.playwright-mcp/
+sudo chown -R $USER:$USER .playwright-mcp/
 
 # Make script executable
 chmod +x script.sh

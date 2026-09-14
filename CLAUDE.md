@@ -4,7 +4,7 @@
 
 ## 🔄 Incremental Updates (Recommended!)
 
-If you already have `x-bookmarks-latest.json`, you can capture only **new** bookmarks:
+If you already have `data/x-bookmarks-latest.json`, you can capture only **new** bookmarks:
 
 **Benefits:**
 - Only captures NEW bookmarks you haven't saved yet
@@ -21,113 +21,149 @@ If you already have `x-bookmarks-latest.json`, you can capture only **new** book
 await mcp__playwright__browser_navigate({ url: "https://x.com/i/bookmarks" });
 ```
 
+X redirects this to `https://x.com/i/history` with the **Bookmarks** tab
+selected (seen 2026-09-14). That is expected. The page still loads bookmarks
+through the `Bookmarks` GraphQL operation with the same response shape, so the
+interceptor works unchanged.
+
 ### Step 2: User Login
 Let user login with their X account. Wait for confirmation before continuing.
 
-### Step 3: Inject Interceptor (No Auto-Start)
+### Step 3: Install Interceptor, Then Load Bookmarks
+
+The interceptor must be hooked **before** X requests the first page of
+bookmarks. Injecting into an already-loaded page misses that page (your newest
+~20 bookmarks), and switching History tabs does not refetch it because X
+renders its cached timeline.
+
+Generate the loader. It inlines `interceptor-no-autostart.js`, because the
+tool's sandbox cannot read files:
+
+```bash
+bun build-interceptor-loader.ts
+# ✅ Wrote interceptor loader to ./data/interceptor-loader.js
+```
+
+Run it from disk:
+
 ```javascript
-const script = await Bun.file('./interceptor-no-autostart.js').text();
-await mcp__playwright__browser_evaluate({
-  function: `() => { ${script} }`,
-  element: "GraphQL interceptor (no auto-start)"
+await mcp__playwright__browser_run_code_unsafe({
+  filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/data/interceptor-loader.js"
 });
 ```
+
+The loader registers the interceptor with `page.addInitScript` (runs before
+X's own scripts on every page load, and is not blocked by x.com's CSP), calls
+`install()` inside that init script, loads the bookmarks page, and waits up to
+30s for the first `Bookmarks` response.
+
+**MANDATORY verification:** the result must start with
+`isActive: true, first page matched: true`. If it says
+`first page matched: false`, the first `Bookmarks` response never arrived
+(logged out, page error, or X renamed the operation). Check
+`browser_network_requests` with filter `/graphql/` before continuing.
+
+Notes:
+- The first page arrives before seed IDs are loaded (Step 4), so all of its
+  bookmarks count as new and are written to a batch file even if you already
+  have them. The combine step deduplicates by ID, so this is harmless.
+- **Do not navigate or reload after Step 4.** The init script builds a fresh
+  interceptor on every page load, which discards the loaded seed IDs.
+- If `browser_run_code_unsafe` is unavailable, paste the contents of
+  `interceptor-no-autostart.js` into `browser_evaluate`, call
+  `window.bookmarkInterceptor.install()`, and then recover the first page as
+  described in Troubleshooting → "Recovering a missed first page".
 
 ### Step 4: Load Existing Bookmarks (For Incremental Updates)
 
-**Required inputs:**
-- `x-bookmarks-latest.json` file path (absolute path)
+**For first-time extraction: skip this step entirely.**
 
-**Approach:** Extract bookmark IDs from the existing file and inject them directly into the interceptor.
-
-**Important:** For efficiency and to avoid file size/token limits, we only load the **1,000 most recent** bookmark IDs. This is sufficient because:
-- Bookmarks are ordered chronologically (newest first)
-- New bookmarks will be at the top of your feed
-- The auto-stop mechanism (5 consecutive batches of existing bookmarks) handles the rest
+First, regenerate the seed file and note the count it prints:
 
 ```bash
-# Extract the 1,000 most recent bookmark IDs (not all IDs)
-jq -r '.bookmarks[0:1000] | map(.id) | @json' x-bookmarks-latest.json
+bun export-seed-ids.ts
+# ✅ Wrote <COUNT> seed IDs to ./data/seed-ids.json
 ```
 
-Then inject the IDs directly into the browser:
+#### Primary path: `browser_run_code_unsafe` (loads ALL IDs, one call)
+
+`bun export-seed-ids.ts` also generated `data/seed-loader.js` — a self-contained
+snippet with every ID inlined. The tool's sandbox has no `require()` and no
+dynamic `import()` (verified 2026-07-11), so the loader is executed from disk
+via the `filename` parameter and the IDs never pass through the model:
 
 ```javascript
-// Load the 1,000 most recent bookmark IDs
-await mcp__playwright__browser_evaluate({
-  function: `() => {
-    const recentIds = BOOKMARK_IDS_ARRAY; // Array of 1000 most recent IDs
-    const bookmarksData = {
-      bookmarks: recentIds.map(id => ({ id: id }))
-    };
-
-    if (window.bookmarkInterceptor) {
-      window.bookmarkInterceptor.existingBookmarkIds.clear();
-      window.bookmarkInterceptor.loadExistingBookmarks(bookmarksData);
-      console.log('✅ Existing bookmarks loaded!');
-    }
-  }`,
-  element: "Load existing bookmark IDs"
+await mcp__playwright__browser_run_code_unsafe({
+  filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/data/seed-loader.js"
 });
 ```
 
-**Note:** Claude Code will handle extracting the IDs and injecting them automatically. You don't need to manually copy-paste the JSON.
+**Expected:** the tool result exceeds the response token limit (it echoes the
+~650KB loader code) and the harness saves it to a file, reporting the path.
+That is normal. Extract the verification line:
 
-**Console output:**
+```bash
+grep -o 'Loaded [0-9]* of [0-9]* seed IDs' <saved-output-file>
 ```
-[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
-[X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
-✅ Existing bookmarks loaded!
+
+**MANDATORY verification:** it must print `Loaded N of N seed IDs` with both
+numbers equal to the count printed by `export-seed-ids.ts`. If the numbers
+differ, or the tool errors, DO NOT start scrolling — fall back to the chunked
+path below.
+
+#### Fallback path: chunked `browser_evaluate` (top 5,000 by capture recency)
+
+Use only if `browser_run_code_unsafe` is unavailable or failed verification.
+`seed-ids.json` is sorted by `capturedAt` descending, so the first 5,000 IDs
+are the ones most recently seen at the top of the bookmarks feed — NOT the
+top of the timestamp-sorted collection file, which sorts by tweet creation
+date and misses recently-bookmarked old tweets.
+
+```bash
+# Chunk 1 of 2:
+jq -c '.ids[0:2500]' data/seed-ids.json
+# Chunk 2 of 2:
+jq -c '.ids[2500:5000]' data/seed-ids.json
 ```
 
-**For first-time extraction:** Skip this step entirely.
+Inject chunk 1 (clears first), then chunk 2 (accumulates):
 
-### Step 5: Start Auto-Scroll Manually
 ```javascript
 await mcp__playwright__browser_evaluate({
   function: `() => {
-    let scrollCount = 0;
-    const maxScrolls = 10000;
-    const scrollDelay = 4000;
-
-    function performScroll() {
-      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
-        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-        return;
-      }
-      if (scrollCount >= maxScrolls) {
-        console.log('🏁 Auto-scroll stopped: Maximum scroll limit reached.');
-        console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} bookmarks.\`);
-        return;
-      }
-
-      const currentHeight = document.body.scrollHeight;
-      window.scrollTo(0, currentHeight);
-      scrollCount++;
-      console.log(\`📜 Auto-scroll \${scrollCount}/\${maxScrolls} - Scrolled to: \${currentHeight}\`);
-
-      setTimeout(() => {
-        if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-          console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist.');
-          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-          return;
-        }
-        if (document.body.scrollHeight === currentHeight) {
-          console.log('🏁 Auto-scroll completed. Reached bottom of page.');
-          console.log(\`📊 Captured \${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.\`);
-          return;
-        }
-        performScroll();
-      }, scrollDelay);
-    }
-
-    console.log('🚀 Starting auto-scroll in 3 seconds...');
-    setTimeout(performScroll, 3000);
+    window.bookmarkInterceptor.existingBookmarkIds.clear();
+    window.bookmarkInterceptor.loadExistingBookmarks({
+      bookmarks: CHUNK_1_IDS_ARRAY.map(id => ({ id })) });
+    return 'Set size: ' + window.bookmarkInterceptor.existingBookmarkIds.size;
   }`,
-  element: "Start auto-scroll function"
+  element: "Load seed IDs chunk 1/2"
+});
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    window.bookmarkInterceptor.loadExistingBookmarks({
+      bookmarks: CHUNK_2_IDS_ARRAY.map(id => ({ id })) });
+    return 'Set size: ' + window.bookmarkInterceptor.existingBookmarkIds.size;
+  }`,
+  element: "Load seed IDs chunk 2/2"
 });
 ```
+
+**MANDATORY verification:** the final call must return `Set size: 5000` (or
+the total collection size if smaller). A lower number means a chunk was
+dropped or corrupted — re-inject before scrolling.
+
+### Step 5: Start Auto-Scroll
+
+The scroll loop lives in `interceptor-no-autostart.js` (`startAutoScroll`). Do not paste a copy of the loop here — just invoke it:
+
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => { startAutoScroll(); return 'auto-scroll started'; }`,
+  element: "Start auto-scroll"
+});
+```
+
+It stops automatically when: (a) 5 consecutive batches contain only existing bookmarks (incremental mode), (b) the bottom of the page is reached, (c) the max scroll limit is hit, or (d) **watchdog**: 10 scrolls pass with zero intercepted bookmark responses — which means the interceptor is broken and the run must be investigated, not retried blindly.
 
 ### Step 6: Monitor Auto-Extraction
 The system auto-scrolls and captures bookmarks. Monitor progress via console messages.
@@ -146,21 +182,47 @@ await mcp__playwright__browser_evaluate({
 
 **Note:** This returns a simple string to avoid response size limits. Complex objects can exceed token limits.
 
-### Step 8: Combine All Files (Optional)
-```bash
-# Files are auto-downloaded to Downloads folder
-# Combine them if you have multiple extraction runs
-BOOKMARK_FILES_DIR="~/Downloads" bun combine-bookmarks.ts
+To wait between checks, put the wait inside the evaluate
+(`await new Promise(r => setTimeout(r, 90000));` before the `return`). Keep it
+at 90s or less. An MCP call that runs longer than ~120s is moved to a
+background task, and its result only arrives later as a notification.
 
-# Or specify custom Playwright output directory
-BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmarks.ts
+If every batch stays 100% new for a long time, check whether the scroll has
+simply not reached the previous run yet:
+
+```bash
+newest=$(ls -t .playwright-mcp/x-bookmarks-graphql-*.json | head -1)
+jq -r '[.bookmarks[].timestamp] | "newest batch tweets: \(min) .. \(max)"' "$newest"
+jq -r '[.bookmarks[].timestamp] | max | "collection newest tweet: \(.)"' data/x-bookmarks-latest.json
 ```
 
-### Step 9: Copy to Current Directory
+Batch tweets newer than the collection's newest tweet mean the previous run is
+still further down the feed. That is expected; keep waiting.
+
+### Step 8: Combine All Files
+
 ```bash
-# Copy the latest combined file back to project
-cp ~/Downloads/x-bookmarks-latest.json ./
+# Downloads land in the project's .playwright-mcp/ directory (verified 2026-09-14).
+# Output always goes to ./data/.
+BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
 ```
+
+The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
+automatically on every run, so no copy step is needed. The script refuses to
+shrink the collection and writes a timestamped backup before every update.
+
+`CLEANUP_BATCH_FILES=1` deletes the raw per-batch files and the completion
+sentinel after a successful merge (they are redundant once
+`x-bookmarks-latest.json` is updated). It only runs after a successful,
+non-shrinking update, and never touches `x-bookmarks-latest.json`, combined
+snapshots, or backups. Leaving it on keeps a stale sentinel from being
+re-reported on the next run. Drop it only if you want to inspect the batch
+files first.
+
+**Verification:** "Final unique bookmarks" must be at least the seed count
+from Step 4 and at most the seed count plus the sentinel's `new_bookmarks`. It
+can be below the sum because the first page is counted as new before seed IDs
+load (see Step 3).
 
 ## 📊 What You Get
 
@@ -173,17 +235,7 @@ cp ~/Downloads/x-bookmarks-latest.json ./
 
 ## 🔄 Combine Multiple Files (Optional)
 
-After extraction, combine all files into one:
-
-```bash
-# Run the combination script (searches ~/Downloads by default)
-bun combine-bookmarks.ts
-
-# Or specify a custom directory where your files are located
-BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmarks.ts
-```
-
-**Tip**: Use the JavaScript evaluation above to find your exact file location, then set `BOOKMARK_FILES_DIR` to that path.
+See Step 8 above — `BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookmarks.ts` writes output to `./data/`. No default search path; you must supply the directory where the browser saved the `x-bookmarks-graphql-*.json` files.
 
 ## 📋 Console Output Example
 
@@ -204,7 +256,7 @@ BOOKMARK_FILES_DIR="/var/folders/.../playwright-mcp-output" bun combine-bookmark
 ```
 ✅ Interceptor ready! Use window.bookmarkInterceptor
 [X-Bookmarks-GraphQL] GraphQL interceptor installed
-[X-Bookmarks-GraphQL] Loaded 1000 existing bookmark IDs
+[X-Bookmarks-GraphQL] Loaded 30221 existing bookmark IDs
 [X-Bookmarks-GraphQL] Auto-scroll will stop when encountering bookmarks that already exist
 ✅ Existing bookmarks loaded!
 
@@ -238,10 +290,16 @@ window.bookmarkInterceptor.saveBookmarks()
 
 ## 📂 Finding Your Downloaded Files
 
-Files are typically auto-downloaded to one of these locations:
-- `.playwright-mcp/` directory in your project
-- `~/Downloads/` folder
-- `/var/folders/.../playwright-mcp-output/` (temporary directory)
+Raw extraction files (`x-bookmarks-graphql-*.json`) are auto-downloaded to the
+project's `.playwright-mcp/` directory (verified 2026-09-14), which is what
+Step 8 uses. If a different Playwright setup saves them elsewhere, locate them
+with:
+
+```bash
+find ~/Downloads .playwright-mcp /var/folders -maxdepth 6 -name 'x-bookmarks-graphql-*.json' -mmin -60 2>/dev/null | xargs -n1 dirname | sort | uniq -c
+```
+
+and pass that directory to Step 8 as `BOOKMARK_FILES_DIR`.
 
 To check progress during extraction:
 
@@ -256,13 +314,27 @@ await mcp__playwright__browser_evaluate({
 });
 ```
 
-**Note**: Use the appropriate directory path in `BOOKMARK_FILES_DIR` when running the combine script.
+### Verifying a run finished (not interrupted)
+
+Every completed auto-scroll writes one `x-bookmarks-DONE-*.json` sentinel to the
+download directory. To confirm a run finished cleanly rather than being
+interrupted (e.g., the laptop closed):
+
+```bash
+cat "$BOOKMARK_FILES_DIR"/x-bookmarks-DONE-*.json 2>/dev/null | tail -1
+```
+
+- `"reason": "All recent bookmarks already exist in your collection."` → clean incremental stop.
+- `"reason": "Reached bottom of page."` → clean full stop.
+- `"reason": "Capture stall detected."` → the interceptor was likely broken; investigate before trusting the batch.
+- **No sentinel file at all** → the run did not finish; re-run before combining.
 
 ## 🎯 Results
 
-- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves)
-- **Combined file**: `x-bookmarks-combined-*.json` (all bookmarks in one file)
-- **Latest file**: `x-bookmarks-latest.json` (easy access to most recent)
+- **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory). Each file holds only the **new** bookmarks from that one batch (~20), not a cumulative snapshot — a full run is tens of MB total, not hundreds. The combine step deduplicates by ID, so overlapping or old cumulative files are harmless.
+- **Canonical collection**: `data/x-bookmarks-latest.json` (merged by Step 8)
+- **Combined outputs**: `data/x-bookmarks-combined-*.json` (full merged snapshots, one per run)
+- **Backups**: `data/x-bookmarks-latest-backup-*.json` (written before every update; 5 newest kept automatically)
 
 **Perfect for**: Backing up bookmarks, data analysis, building personal tools, archiving collections.
 
@@ -277,7 +349,7 @@ After extraction and combining, view your bookmarks in an interactive interface:
 This will:
 1. Start a local Python web server on port 8080
 2. Open the bookmark viewer in your browser
-3. Load your `x-bookmarks-latest.json` file
+3. Load your `data/x-bookmarks-latest.json` file
 
 **Features:**
 - Advanced search with AND/OR operators, exclusions, exact phrases
@@ -291,18 +363,56 @@ Press `Ctrl+C` to stop the server when done.
 
 ## 🔧 Troubleshooting
 
-### Why only load 1,000 recent bookmark IDs?
+### Why a seed file instead of injecting IDs from chat?
 
-**Problem**: Loading all bookmark IDs (e.g., 28,000+) causes several issues:
-- File size exceeds browser/tool limits (600KB+ JSON)
-- Token limits in responses (25,000 token max)
-- Slow injection time
+Injecting ~30k IDs (~650KB) through model-generated tool calls is slow,
+expensive (~190k output tokens), and risks transcription errors. The seed file
++ `browser_run_code_unsafe` path moves the data disk→Node→page without the
+model in the loop. The chunked fallback caps at 5,000 IDs to bound token cost;
+it is a heuristic keyed on capture recency, so expect auto-stop to fire
+slightly later than with the full set.
 
-**Solution**: Load only the 1,000 most recent IDs because:
-- Bookmarks are chronologically ordered (newest first)
-- New bookmarks appear at the top of your feed
-- The auto-stop mechanism (5 consecutive batches) handles detection
-- Typical incremental updates are <500 bookmarks
+### Why not fetch the seed file from a local HTTP server?
+
+x.com sends a strict `Content-Security-Policy: connect-src` allowlist that
+does not include localhost. In-page `fetch('http://localhost:...')` is blocked
+by CSP before CORS applies. (Verified 2026-07-11.)
+
+### Recovering a missed first page
+
+Only needed when the interceptor was installed after the bookmarks page had
+already loaded (the Step 3 fallback). The first `Bookmarks` response
+(`count: 20`, no `cursor`) is still in Playwright's network log.
+
+1. Find it with `browser_network_requests` and `filter: "/Bookmarks\\?"`. Use
+   the entry whose `variables` have no `cursor`.
+2. Save its body. The `filename` must be inside the project directory, since
+   Playwright MCP refuses other paths (including the Claude scratchpad):
+   ```javascript
+   await mcp__playwright__browser_network_request({
+     index: N, part: "response-body",
+     filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/.playwright-mcp/first-page.json"
+   });
+   ```
+3. Convert it into a normal batch file with the real extractor, dropping IDs
+   you already have:
+   ```bash
+   bun -e '
+   const fs = require("fs");
+   const { BookmarkGraphQLInterceptor } = require("./interceptor-no-autostart.js");
+   const seed = new Set(JSON.parse(fs.readFileSync("data/seed-ids.json", "utf8")).ids);
+   const all = new BookmarkGraphQLInterceptor().extractBookmarksFromResponse(
+     JSON.parse(fs.readFileSync(".playwright-mcp/first-page.json", "utf8")));
+   const fresh = all.filter(b => !seed.has(b.id));
+   fs.writeFileSync(".playwright-mcp/x-bookmarks-graphql-first-page.json", JSON.stringify(
+     { exported_at: new Date().toISOString(), total_bookmarks: fresh.length,
+       source: "graphql-interceptor", bookmarks: fresh }, null, 2));
+   console.log(`extracted ${all.length}, new ${fresh.length}`);
+   '
+   rm .playwright-mcp/first-page.json
+   ```
+
+Step 8 merges that batch file like any other.
 
 ### Browser Security Restrictions
 

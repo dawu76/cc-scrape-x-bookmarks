@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
 // Script to combine all GraphQL bookmark files into a single comprehensive file
-import { execSync } from 'child_process';
+import { mkdirSync, readdirSync, unlinkSync } from 'fs';
+import { join, resolve } from 'path';
 
 // Check if running with bun
 if (typeof Bun === 'undefined') {
@@ -63,16 +64,76 @@ console.log('🔄 Starting bookmark combination process...');
 // - Downloads: `${process.env.HOME}/Downloads`
 // - Playwright temp: `/var/folders/.../playwright-mcp-output`
 // - Current directory: `.`
-const downloadsDir = process.env.BOOKMARK_FILES_DIR || `${process.env.HOME}/Downloads`;
+const downloadsDir = process.env.BOOKMARK_FILES_DIR;
+if (!downloadsDir) {
+  console.error('❌ BOOKMARK_FILES_DIR is required. Set it to the directory containing your bookmark JSON files.');
+  console.error('   Example: BOOKMARK_FILES_DIR=~/Downloads bun combine-bookmarks.ts');
+  process.exit(1);
+}
+
+const outputDir = process.env.OUTPUT_DIR || './data';
+mkdirSync(outputDir, { recursive: true });
 
 console.log(`📁 Searching for files in: ${downloadsDir}`);
 
-// Find all bookmark files (graphql extractions, combined files, and latest.json)
-const findCommand = `find "${downloadsDir}" \\( -name "x-bookmarks-graphql-*.json" -o -name "x-bookmarks-combined-*.json" -o -name "x-bookmarks-latest.json" \\) -type f`;
-const fileListOutput = execSync(findCommand, { encoding: 'utf8' });
-const files = fileListOutput.trim().split('\n').filter(f => f);
+// Recursively find files under rootDir whose basename satisfies `matches`,
+// without shelling out (no quoting pitfalls). Skips unreadable directories,
+// matching find's tolerance.
+function findFiles(rootDir: string, matches: (name: string) => boolean): string[] {
+  const results: string[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && matches(entry.name)) results.push(full);
+    }
+  };
+  walk(rootDir);
+  return results;
+}
+
+const isBookmarkFile = (name: string) =>
+  /^x-bookmarks-graphql-.*\.json$/.test(name) ||
+  /^x-bookmarks-combined-.*\.json$/.test(name) ||
+  name === 'x-bookmarks-latest.json';
+
+const isSentinelFile = (name: string) => /^x-bookmarks-DONE-.*\.json$/.test(name);
+
+const files = findFiles(downloadsDir, isBookmarkFile);
 
 console.log(`📁 Found ${files.length} bookmark file(s)`);
+
+// Report whether this batch came from a run that finished cleanly. The
+// interceptor writes exactly one x-bookmarks-DONE-*.json per completed run.
+const sentinels = findFiles(downloadsDir, isSentinelFile).sort();
+if (sentinels.length === 0) {
+  console.warn('⚠️  No completion sentinel (x-bookmarks-DONE-*.json) found.');
+  console.warn('   The extraction run may have been interrupted before finishing. Combining anyway.');
+} else {
+  const newest = sentinels[sentinels.length - 1];
+  try {
+    const s = JSON.parse(await Bun.file(newest).text());
+    console.log(`✅ Completion sentinel found: reason="${s.reason}", new_bookmarks=${s.new_bookmarks}, matched_requests=${s.matched_requests}`);
+    if (/stall/i.test(s.reason || '')) {
+      console.warn('⚠️  Run stopped on a capture STALL (interceptor may be broken). Review before trusting this batch.');
+    }
+  } catch (err) {
+    console.warn(`⚠️  Could not read completion sentinel ${newest}:`, err);
+  }
+}
+
+// Always merge the canonical collection so incremental runs never drop history
+const canonicalLatest = resolve(outputDir, 'x-bookmarks-latest.json');
+const resolvedFiles = files.map(f => resolve(f));
+if (await Bun.file(canonicalLatest).exists() && !resolvedFiles.includes(canonicalLatest)) {
+  files.push(canonicalLatest);
+}
 
 // Safety check: Exit early if no files found
 if (files.length === 0) {
@@ -135,7 +196,7 @@ const combinedData: CombinedData = {
 
 // Generate timestamp for filename
 const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-const outputPath = `${downloadsDir}/x-bookmarks-combined-${timestamp}.json`;
+const outputPath = `${outputDir}/x-bookmarks-combined-${timestamp}.json`;
 
 // Show summary before writing
 console.log('\n📊 Pre-save validation:');
@@ -154,7 +215,7 @@ console.log(`   • Final unique bookmarks: ${uniqueBookmarks.length}`);
 console.log(`📄 Combined file saved to: ${outputPath}`);
 
 // Also create a latest.json for easy access (with safety checks)
-const latestPath = `${downloadsDir}/x-bookmarks-latest.json`;
+const latestPath = `${outputDir}/x-bookmarks-latest.json`;
 
 // Safety check 1: Don't overwrite if we have 0 bookmarks
 if (uniqueBookmarks.length === 0) {
@@ -177,12 +238,12 @@ if (uniqueBookmarks.length === 0) {
         shouldUpdate = false;
 
         // Create a backup just in case
-        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        const backupPath = `${outputDir}/x-bookmarks-latest-backup-${timestamp}.json`;
         await Bun.write(backupPath, existingContent);
         console.log(`📦 Existing file backed up to: ${backupPath}`);
       } else {
         // Create backup before updating (existing file will be replaced)
-        const backupPath = `${downloadsDir}/x-bookmarks-latest-backup-${timestamp}.json`;
+        const backupPath = `${outputDir}/x-bookmarks-latest-backup-${timestamp}.json`;
         await Bun.write(backupPath, existingContent);
         console.log(`📦 Previous version backed up to: ${backupPath}`);
       }
@@ -191,6 +252,36 @@ if (uniqueBookmarks.length === 0) {
     if (shouldUpdate) {
       await Bun.write(latestPath, JSON.stringify(combinedData, null, 2));
       console.log(`🔗 Latest file updated at: ${latestPath}`);
+
+      // Retention: keep only the 5 newest latest-backups (ISO names sort chronologically)
+      const BACKUPS_TO_KEEP = 5;
+      const backups = readdirSync(outputDir)
+        .filter((f) => /^x-bookmarks-latest-backup-.*\.json$/.test(f))
+        .sort();
+      for (const oldBackup of backups.slice(0, Math.max(0, backups.length - BACKUPS_TO_KEEP))) {
+        unlinkSync(join(outputDir, oldBackup));
+        console.log(`🧹 Pruned old backup: ${oldBackup}`);
+      }
+
+      // Opt-in: remove the raw per-batch files and the sentinel we just merged.
+      // They are pure intermediates — at this point the canonical latest.json,
+      // a timestamped combined snapshot, and a backup all exist. Scoped to the
+      // download directory and to graphql/DONE names, so the canonical file,
+      // combined snapshots, and backups are never touched.
+      if (process.env.CLEANUP_BATCH_FILES === '1') {
+        const consumable = (name: string) =>
+          /^x-bookmarks-graphql-.*\.json$/.test(name) || /^x-bookmarks-DONE-.*\.json$/.test(name);
+        let removed = 0;
+        for (const f of findFiles(downloadsDir, consumable)) {
+          try {
+            unlinkSync(f);
+            removed++;
+          } catch (err) {
+            console.warn(`⚠️  Could not delete ${f}:`, err);
+          }
+        }
+        console.log(`🧹 CLEANUP_BATCH_FILES=1: deleted ${removed} consumed batch/sentinel file(s) from ${downloadsDir}`);
+      }
     }
   } catch (error) {
     console.warn(`⚠️  Could not update latest file:`, error);

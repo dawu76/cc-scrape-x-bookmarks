@@ -8,10 +8,13 @@ class BookmarkGraphQLInterceptor {
     this.existingBookmarkIds = new Set(); // Track existing bookmark IDs
     this.isActive = false;
     this.originalXHROpen = null;
+    this.originalFetch = null;
+    this.matchedRequestCount = 0; // successfully parsed bookmark responses (any transport)
     this.logPrefix = '[X-Bookmarks-GraphQL]';
     this.shouldStopScrolling = false; // Flag to stop auto-scroll when we hit existing bookmarks
-    this.consecutiveExistingCount = 0; // Count consecutive existing bookmarks
-    this.stopThreshold = 5; // Stop after this many consecutive existing bookmarks
+    this.consecutiveExistingCount = 0; // consecutive batches where every bookmark already existed
+    this.stopThreshold = 5; // stop after this many consecutive all-existing batches
+    this.unsavedBookmarks = []; // delta buffer: new bookmarks not yet written to disk
   }
 
   log(message, ...args) {
@@ -33,25 +36,31 @@ class BookmarkGraphQLInterceptor {
       return;
     }
 
-    // Store original XMLHttpRequest.open method
-    this.originalXHROpen = XMLHttpRequest.prototype.open;
-    const self = this;
+    if (typeof XMLHttpRequest !== 'undefined') {
+      // Store original XMLHttpRequest.open method
+      this.originalXHROpen = XMLHttpRequest.prototype.open;
+      const self = this;
 
-    // Override XMLHttpRequest.prototype.open
-    XMLHttpRequest.prototype.open = function(method, url, ...args) {
-      // Apply the original open method
-      self.originalXHROpen.apply(this, [method, url, ...args]);
+      // Override XMLHttpRequest.prototype.open
+      XMLHttpRequest.prototype.open = function(method, url, ...args) {
+        // Apply the original open method
+        self.originalXHROpen.apply(this, [method, url, ...args]);
 
-      // Check if this is a bookmark GraphQL request
-      if (self.isBookmarkRequest(url)) {
-        self.log('Detected bookmark GraphQL request:', url);
+        // Check if this is a bookmark GraphQL request
+        if (self.isBookmarkRequest(url)) {
+          self.log('Detected bookmark GraphQL request:', url);
 
-        // Add load event listener to capture response
-        this.addEventListener('load', function() {
-          self.handleBookmarkResponse(this, method, url);
-        });
-      }
-    };
+          // Add load event listener to capture response
+          this.addEventListener('load', function() {
+            self.handleBookmarkResponse(this, method, url);
+          });
+        }
+      };
+    } else {
+      this.warn('XMLHttpRequest not available; skipping XHR hook');
+    }
+
+    this.installFetchHook();
 
     this.isActive = true;
     this.log('GraphQL interceptor installed');
@@ -72,8 +81,46 @@ class BookmarkGraphQLInterceptor {
       this.originalXHROpen = null;
     }
 
+    if (this.originalFetch) {
+      globalThis.fetch = this.originalFetch;
+      this.originalFetch = null;
+    }
+
     this.isActive = false;
     this.log('GraphQL interceptor uninstalled');
+  }
+
+  // Install fetch() hook so capture survives an XHR->fetch migration by X
+  installFetchHook() {
+    if (typeof globalThis.fetch !== 'function') {
+      this.warn('fetch not available; skipping fetch hook');
+      return;
+    }
+    this.originalFetch = globalThis.fetch;
+    const self = this;
+    globalThis.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const resultPromise = self.originalFetch.apply(this, arguments);
+      if (self.isBookmarkRequest(url)) {
+        self.log('Detected bookmark GraphQL request (fetch):', url);
+        resultPromise
+          .then((response) => {
+            if (response.status !== 200) {
+              self.warn(`Non-200 fetch response for ${url}:`, response.status);
+              return;
+            }
+            response
+              .clone()
+              .text()
+              .then((text) => {
+                if (text) self.processResponseText(text, url);
+              })
+              .catch((err) => self.error('Failed to read fetch response body:', err));
+          })
+          .catch(() => { /* network errors belong to the page, not the hook */ });
+      }
+      return resultPromise;
+    };
   }
 
   // Check if the URL is a bookmark GraphQL request
@@ -98,20 +145,23 @@ class BookmarkGraphQLInterceptor {
     }, 1000);
   }
 
-  // Handle bookmark GraphQL response
+  // Handle bookmark GraphQL response (XHR transport)
   handleBookmarkResponse(xhr, method, url) {
+    if (xhr.status !== 200) {
+      this.warn(`Non-200 response for ${url}:`, xhr.status);
+      return;
+    }
+    if (!xhr.responseText) {
+      this.warn('Empty response for', url);
+      return;
+    }
+    this.processResponseText(xhr.responseText, url);
+  }
+
+  // Transport-agnostic: parse one bookmark GraphQL response body
+  processResponseText(responseText, url) {
     try {
-      if (xhr.status !== 200) {
-        this.warn(`Non-200 response for ${url}:`, xhr.status);
-        return;
-      }
-
-      const responseText = xhr.responseText;
-      if (!responseText) {
-        this.warn('Empty response for', url);
-        return;
-      }
-
+      this.matchedRequestCount++;
       const json = JSON.parse(responseText);
       const newBookmarks = this.extractBookmarksFromResponse(json);
 
@@ -126,6 +176,7 @@ class BookmarkGraphQLInterceptor {
             this.log(`⏭️  Skipping existing bookmark: ${bookmark.id}`);
           } else {
             this.bookmarks.set(bookmark.id, bookmark);
+            this.unsavedBookmarks.push(bookmark);
             newCount++;
           }
         });
@@ -156,7 +207,7 @@ class BookmarkGraphQLInterceptor {
     } catch (err) {
       this.error('Failed to parse bookmark response:', err);
       this.error('URL:', url);
-      this.error('Response:', xhr.responseText?.substring(0, 500) + '...');
+      this.error('Response:', responseText?.substring(0, 500) + '...');
     }
   }
 
@@ -324,38 +375,33 @@ class BookmarkGraphQLInterceptor {
     return media;
   }
 
-  // Save bookmarks to storage
+  // Save bookmarks by downloading a JSON snapshot of only the bookmarks
+  // captured since the last successful save (a delta). Files on disk are the
+  // durable store; the combine script deduplicates by ID and recovers from
+  // partial runs. The buffer is cleared only when the download succeeds, so a
+  // failed save is retried in the next batch instead of being lost.
   saveBookmarks() {
-    try {
-      const bookmarksList = Array.from(this.bookmarks.values());
-      const exportData = {
-        exported_at: new Date().toISOString(),
-        total_bookmarks: bookmarksList.length,
-        source: 'graphql-interceptor',
-        bookmarks: bookmarksList
-      };
-
-      // Store in localStorage for persistence
-      localStorage.setItem('x-bookmarks-graphql-data', JSON.stringify(exportData));
-      
-      // Also trigger download
-      this.downloadBookmarks(exportData);
-
-    } catch (err) {
-      this.error('Failed to save bookmarks:', err);
+    if (this.unsavedBookmarks.length === 0) return;
+    const exportData = {
+      exported_at: new Date().toISOString(),
+      total_bookmarks: this.unsavedBookmarks.length,
+      source: 'graphql-interceptor',
+      bookmarks: this.unsavedBookmarks
+    };
+    if (this.downloadBookmarks(exportData)) {
+      this.unsavedBookmarks = [];
     }
   }
 
-  // Download bookmarks as JSON file
-  downloadBookmarks(exportData) {
+  // Trigger a browser download of `data` serialized as `filename`.
+  // Returns true on success, false on a caught error. Single source of the
+  // blob -> anchor -> click plumbing shared by every file the interceptor writes.
+  downloadJSON(data, filename) {
     try {
-      const jsonString = JSON.stringify(exportData, null, 2);
+      const jsonString = JSON.stringify(data, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-      const filename = `x-bookmarks-graphql-${timestamp}.json`;
-      
+
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -363,11 +409,39 @@ class BookmarkGraphQLInterceptor {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
-      this.log(`Downloaded ${exportData.total_bookmarks} bookmarks to ${filename}`);
+      return true;
     } catch (err) {
-      this.error('Failed to download bookmarks:', err);
+      this.error('Failed to download', filename, err);
+      return false;
     }
+  }
+
+  // Download the delta buffer as a timestamped batch file.
+  downloadBookmarks(exportData) {
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `x-bookmarks-graphql-${timestamp}.json`;
+    const ok = this.downloadJSON(exportData, filename);
+    if (ok) this.log(`Downloaded ${exportData.total_bookmarks} bookmarks to ${filename}`);
+    return ok;
+  }
+
+  // Write a small completion sentinel so a later combine run (or the operator)
+  // can distinguish a finished run from one that was interrupted (e.g., the
+  // laptop was closed). `reason` is the human-readable stop reason from the
+  // auto-scroll driver — including the watchdog's "Capture stall detected."
+  writeCompletionSentinel(reason) {
+    const sentinel = {
+      status: 'complete',
+      reason,
+      new_bookmarks: this.bookmarks.size,
+      matched_requests: this.matchedRequestCount,
+      completed_at: new Date().toISOString()
+    };
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `x-bookmarks-DONE-${timestamp}.json`;
+    const ok = this.downloadJSON(sentinel, filename);
+    if (ok) this.log(`Wrote completion sentinel ${filename} (reason: ${reason})`);
+    return ok;
   }
 
   // Get current bookmark count
@@ -383,26 +457,7 @@ class BookmarkGraphQLInterceptor {
   // Clear all captured bookmarks
   clearBookmarks() {
     this.bookmarks.clear();
-    localStorage.removeItem('x-bookmarks-graphql-data');
     this.log('Cleared all bookmarks');
-  }
-
-  // Load bookmarks from localStorage
-  loadBookmarks() {
-    try {
-      const stored = localStorage.getItem('x-bookmarks-graphql-data');
-      if (stored) {
-        const data = JSON.parse(stored);
-        if (data.bookmarks && Array.isArray(data.bookmarks)) {
-          data.bookmarks.forEach(bookmark => {
-            this.bookmarks.set(bookmark.id, bookmark);
-          });
-          this.log(`Loaded ${this.bookmarks.size} bookmarks from storage`);
-        }
-      }
-    } catch (err) {
-      this.error('Failed to load bookmarks from storage:', err);
-    }
   }
 
   // Load existing bookmarks from a JSON file/object to enable incremental updates
@@ -447,63 +502,84 @@ class BookmarkGraphQLInterceptor {
   }
 }
 
-// Create global instance
-window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
+// Auto-scroll driver. Single source of truth — CLAUDE.md Step 5 calls this;
+// do not paste a copy of this loop into documentation.
+function startAutoScroll(options = {}) {
+  const maxScrolls = options.maxScrolls || 10000;
+  const scrollDelay = options.scrollDelay || 4000;
+  const startDelay = options.startDelay || 3000;
+  // Watchdog: if this many scrolls pass without a single intercepted bookmark
+  // response, the interceptor is likely broken (e.g., X changed its API).
+  const stallLimit = options.stallLimit || 10;
+  const onStop = options.onStop || function () {};
 
-// Auto-scroll functionality
-function startAutoScroll() {
+  const interceptor = window.bookmarkInterceptor;
   let scrollCount = 0;
-  const maxScrolls = 10000; // Increased limit - will stop when hitting existing bookmarks
-  const scrollDelay = 4000; // 4 seconds between scrolls
+  let lastMatchedCount = interceptor.matchedRequestCount;
+  let stalledScrolls = 0;
+  let stopped = false;
+
+  function finish(reason) {
+    if (stopped) return;
+    stopped = true;
+    console.log(`🏁 Auto-scroll stopped: ${reason}`);
+    console.log(`📊 Captured ${interceptor.getBookmarkCount()} new bookmarks.`);
+    interceptor.writeCompletionSentinel(reason);
+    onStop(reason);
+  }
 
   function performScroll() {
-    // Check if we should stop due to existing bookmarks
-    if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-      console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
-      console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-      return;
+    if (interceptor.shouldStopAutoScroll()) {
+      return finish('All recent bookmarks already exist in your collection.');
+    }
+    if (scrollCount >= maxScrolls) {
+      return finish('Maximum scroll limit reached.');
     }
 
-    if (scrollCount >= maxScrolls) {
-      console.log('🏁 Auto-scroll completed. Reached maximum scroll limit.');
-      return;
+    if (interceptor.matchedRequestCount === lastMatchedCount) {
+      stalledScrolls++;
+      if (stalledScrolls >= stallLimit) {
+        console.error(
+          `🛑 No bookmark API responses intercepted in the last ${stallLimit} scrolls. ` +
+          `The interceptor may be broken (X may have changed its API). Stopping.`
+        );
+        return finish('Capture stall detected.');
+      }
+    } else {
+      stalledScrolls = 0;
+      lastMatchedCount = interceptor.matchedRequestCount;
     }
 
     const currentHeight = document.body.scrollHeight;
     window.scrollTo(0, currentHeight);
     scrollCount++;
-
     console.log(`📜 Auto-scroll ${scrollCount}/${maxScrolls} - Scrolled to: ${currentHeight}`);
 
-    // Check if we've reached the bottom (no new content loaded)
     setTimeout(() => {
-      // Check stop flag again before continuing
-      if (window.bookmarkInterceptor.shouldStopAutoScroll()) {
-        console.log('🏁 Auto-scroll stopped: All recent bookmarks already exist in your collection.');
-        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-        return;
+      if (interceptor.shouldStopAutoScroll()) {
+        return finish('All recent bookmarks already exist in your collection.');
       }
-
       if (document.body.scrollHeight === currentHeight) {
-        console.log('🏁 Auto-scroll completed. Reached bottom of page.');
-        console.log(`📊 Captured ${window.bookmarkInterceptor.getBookmarkCount()} new bookmarks.`);
-        return;
+        return finish('Reached bottom of page.');
       }
       performScroll();
     }, scrollDelay);
   }
 
-  // Start scrolling after initial load
-  setTimeout(performScroll, 3000);
+  console.log(`🚀 Starting auto-scroll in ${startDelay / 1000} seconds...`);
+  setTimeout(performScroll, startDelay);
 }
 
-
-// Export for module usage
-if (typeof module \!== 'undefined' && module.exports) {
-  module.exports = BookmarkGraphQLInterceptor;
+// Create global instance (browser injection context only)
+if (typeof window !== 'undefined') {
+  window.bookmarkInterceptor = new BookmarkGraphQLInterceptor();
+  window.startAutoScroll = startAutoScroll;
+  console.log('✅ Interceptor ready! Use window.bookmarkInterceptor');
+  console.log('🚀 To start auto-scroll: call startAutoScroll()');
 }
 
-console.log('✅ Interceptor ready\! Use window.bookmarkInterceptor');
-console.log('📖 To load existing bookmarks: Use Claude Code file upload');
-console.log('🚀 To start manually: Call startAutoScroll()');
+// Export for Node/Bun test usage (no-op in the browser)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { BookmarkGraphQLInterceptor, startAutoScroll };
+}
 
