@@ -163,7 +163,7 @@ gh pr create --title "Add financial analysis features" --body "Description of ch
 
 ```bash
 # Remove all downloaded bookmark files
-rm ~/.playwright-mcp/x-bookmarks-graphql-*.json
+rm .playwright-mcp/x-bookmarks-graphql-*.json
 
 # ⚠️ NEVER delete data/x-bookmarks-latest.json — it is the canonical and only
 # copy of the collection. It is already git-ignored; there is nothing to clean.
@@ -210,24 +210,24 @@ alias serve='python3 -m http.server 8000'
 ```bash
 # Create a backup before deleting files
 mkdir -p ~/backups/bookmarks-$(date +%Y%m%d)
-cp ~/.playwright-mcp/x-bookmarks-graphql-*.json ~/backups/bookmarks-$(date +%Y%m%d)/
+cp .playwright-mcp/x-bookmarks-graphql-*.json ~/backups/bookmarks-$(date +%Y%m%d)/
 ```
 
 ### Find Files by Date
 
 ```bash
 # Find bookmark files modified in last 24 hours
-find ~/.playwright-mcp -name "x-bookmarks-graphql-*.json" -mtime -1
+find .playwright-mcp -name "x-bookmarks-graphql-*.json" -mtime -1
 
 # Find files larger than 10MB
-find ~/.playwright-mcp -name "*.json" -size +10M
+find .playwright-mcp -name "*.json" -size +10M
 ```
 
 ### Compress Old Bookmark Files
 
 ```bash
 # Compress all but the latest file
-ls -t ~/.playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs tar -czf bookmarks-archive.tar.gz
+ls -t .playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs tar -czf bookmarks-archive.tar.gz
 
 # Extract compressed archive
 tar -xzf bookmarks-archive.tar.gz
@@ -239,7 +239,7 @@ tar -xzf bookmarks-archive.tar.gz
 
 ```bash
 # If you get permission denied
-sudo chown -R $USER:$USER ~/.playwright-mcp/
+sudo chown -R $USER:$USER .playwright-mcp/
 
 # Make script executable
 chmod +x script.sh

@@ -21,30 +21,58 @@ If you already have `data/x-bookmarks-latest.json`, you can capture only **new**
 await mcp__playwright__browser_navigate({ url: "https://x.com/i/bookmarks" });
 ```
 
+X redirects this to `https://x.com/i/history` with the **Bookmarks** tab
+selected (seen 2026-09-14). That is expected. The page still loads bookmarks
+through the `Bookmarks` GraphQL operation with the same response shape, so the
+interceptor works unchanged.
+
 ### Step 2: User Login
 Let user login with their X account. Wait for confirmation before continuing.
 
-### Step 3: Inject Interceptor (No Auto-Start)
+### Step 3: Install Interceptor, Then Load Bookmarks
+
+The interceptor must be hooked **before** X requests the first page of
+bookmarks. Injecting into an already-loaded page misses that page (your newest
+~20 bookmarks), and switching History tabs does not refetch it because X
+renders its cached timeline.
+
+Generate the loader. It inlines `interceptor-no-autostart.js`, because the
+tool's sandbox cannot read files:
+
+```bash
+bun build-interceptor-loader.ts
+# ✅ Wrote interceptor loader to ./data/interceptor-loader.js
+```
+
+Run it from disk:
+
 ```javascript
-const script = await Bun.file('./interceptor-no-autostart.js').text();
-await mcp__playwright__browser_evaluate({
-  function: `() => { ${script} }`,
-  element: "GraphQL interceptor (no auto-start)"
+await mcp__playwright__browser_run_code_unsafe({
+  filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/data/interceptor-loader.js"
 });
 ```
 
-Injecting only runs the constructor — it does **not** hook `XMLHttpRequest`/`fetch`.
-You must call `install()` separately, or auto-scroll will run with zero captures
-and eventually trip the watchdog:
+The loader registers the interceptor with `page.addInitScript` (runs before
+X's own scripts on every page load, and is not blocked by x.com's CSP), calls
+`install()` inside that init script, loads the bookmarks page, and waits up to
+30s for the first `Bookmarks` response.
 
-```javascript
-await mcp__playwright__browser_evaluate({
-  function: `() => { window.bookmarkInterceptor.install(); return 'isActive: ' + window.bookmarkInterceptor.isActive; }`,
-  element: "Install GraphQL interceptor hooks"
-});
-```
+**MANDATORY verification:** the result must start with
+`isActive: true, first page matched: true`. If it says
+`first page matched: false`, the first `Bookmarks` response never arrived
+(logged out, page error, or X renamed the operation). Check
+`browser_network_requests` with filter `/graphql/` before continuing.
 
-**MANDATORY verification:** must return `isActive: true` before proceeding to Step 4.
+Notes:
+- The first page arrives before seed IDs are loaded (Step 4), so all of its
+  bookmarks count as new and are written to a batch file even if you already
+  have them. The combine step deduplicates by ID, so this is harmless.
+- **Do not navigate or reload after Step 4.** The init script builds a fresh
+  interceptor on every page load, which discards the loaded seed IDs.
+- If `browser_run_code_unsafe` is unavailable, paste the contents of
+  `interceptor-no-autostart.js` into `browser_evaluate`, call
+  `window.bookmarkInterceptor.install()`, and then recover the first page as
+  described in Troubleshooting → "Recovering a missed first page".
 
 ### Step 4: Load Existing Bookmarks (For Incremental Updates)
 
@@ -154,30 +182,47 @@ await mcp__playwright__browser_evaluate({
 
 **Note:** This returns a simple string to avoid response size limits. Complex objects can exceed token limits.
 
+To wait between checks, put the wait inside the evaluate
+(`await new Promise(r => setTimeout(r, 90000));` before the `return`). Keep it
+at 90s or less. An MCP call that runs longer than ~120s is moved to a
+background task, and its result only arrives later as a notification.
+
+If every batch stays 100% new for a long time, check whether the scroll has
+simply not reached the previous run yet:
+
+```bash
+newest=$(ls -t .playwright-mcp/x-bookmarks-graphql-*.json | head -1)
+jq -r '[.bookmarks[].timestamp] | "newest batch tweets: \(min) .. \(max)"' "$newest"
+jq -r '[.bookmarks[].timestamp] | max | "collection newest tweet: \(.)"' data/x-bookmarks-latest.json
+```
+
+Batch tweets newer than the collection's newest tweet mean the previous run is
+still further down the feed. That is expected; keep waiting.
+
 ### Step 8: Combine All Files
 
 ```bash
-# Input: directory where the browser saved x-bookmarks-graphql-*.json downloads
-# (check the Playwright session's download location). Output always goes to ./data/.
-BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookmarks.ts
+# Downloads land in the project's .playwright-mcp/ directory (verified 2026-09-14).
+# Output always goes to ./data/.
+BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
 ```
 
 The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
-automatically on every run — no copy step is needed. The script refuses to
+automatically on every run, so no copy step is needed. The script refuses to
 shrink the collection and writes a timestamped backup before every update.
 
-To also delete the raw per-batch files and the completion sentinel after a
-successful merge (they are redundant once `x-bookmarks-latest.json` is updated),
-set `CLEANUP_BATCH_FILES=1`:
+`CLEANUP_BATCH_FILES=1` deletes the raw per-batch files and the completion
+sentinel after a successful merge (they are redundant once
+`x-bookmarks-latest.json` is updated). It only runs after a successful,
+non-shrinking update, and never touches `x-bookmarks-latest.json`, combined
+snapshots, or backups. Leaving it on keeps a stale sentinel from being
+re-reported on the next run. Drop it only if you want to inspect the batch
+files first.
 
-```bash
-BOOKMARK_FILES_DIR="/path/to/downloads" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
-```
-
-This only runs after a successful, non-shrinking update, and never touches
-`x-bookmarks-latest.json`, combined snapshots, or backups. Recommended for
-resetting the download directory between runs so a stale sentinel from a prior
-run is not re-reported.
+**Verification:** "Final unique bookmarks" must be at least the seed count
+from Step 4 and at most the seed count plus the sentinel's `new_bookmarks`. It
+can be below the sum because the first page is counted as new before seed IDs
+load (see Step 3).
 
 ## 📊 What You Get
 
@@ -245,12 +290,16 @@ window.bookmarkInterceptor.saveBookmarks()
 
 ## 📂 Finding Your Downloaded Files
 
-Raw extraction files (`x-bookmarks-graphql-*.json`) are auto-downloaded to the Playwright session's download directory. Common locations:
-- `.playwright-mcp/` directory in your project
-- `~/Downloads/` folder
-- `/var/folders/.../playwright-mcp-output/` (temporary directory)
+Raw extraction files (`x-bookmarks-graphql-*.json`) are auto-downloaded to the
+project's `.playwright-mcp/` directory (verified 2026-09-14), which is what
+Step 8 uses. If a different Playwright setup saves them elsewhere, locate them
+with:
 
-Pass that path to Step 8 (`BOOKMARK_FILES_DIR="..."`) to merge them into `data/x-bookmarks-latest.json`.
+```bash
+find ~/Downloads .playwright-mcp /var/folders -maxdepth 6 -name 'x-bookmarks-graphql-*.json' -mmin -60 2>/dev/null | xargs -n1 dirname | sort | uniq -c
+```
+
+and pass that directory to Step 8 as `BOOKMARK_FILES_DIR`.
 
 To check progress during extraction:
 
@@ -328,6 +377,42 @@ slightly later than with the full set.
 x.com sends a strict `Content-Security-Policy: connect-src` allowlist that
 does not include localhost. In-page `fetch('http://localhost:...')` is blocked
 by CSP before CORS applies. (Verified 2026-07-11.)
+
+### Recovering a missed first page
+
+Only needed when the interceptor was installed after the bookmarks page had
+already loaded (the Step 3 fallback). The first `Bookmarks` response
+(`count: 20`, no `cursor`) is still in Playwright's network log.
+
+1. Find it with `browser_network_requests` and `filter: "/Bookmarks\\?"`. Use
+   the entry whose `variables` have no `cursor`.
+2. Save its body. The `filename` must be inside the project directory, since
+   Playwright MCP refuses other paths (including the Claude scratchpad):
+   ```javascript
+   await mcp__playwright__browser_network_request({
+     index: N, part: "response-body",
+     filename: "/Users/howardwu/dev/cc-scrape-x-bookmarks/.playwright-mcp/first-page.json"
+   });
+   ```
+3. Convert it into a normal batch file with the real extractor, dropping IDs
+   you already have:
+   ```bash
+   bun -e '
+   const fs = require("fs");
+   const { BookmarkGraphQLInterceptor } = require("./interceptor-no-autostart.js");
+   const seed = new Set(JSON.parse(fs.readFileSync("data/seed-ids.json", "utf8")).ids);
+   const all = new BookmarkGraphQLInterceptor().extractBookmarksFromResponse(
+     JSON.parse(fs.readFileSync(".playwright-mcp/first-page.json", "utf8")));
+   const fresh = all.filter(b => !seed.has(b.id));
+   fs.writeFileSync(".playwright-mcp/x-bookmarks-graphql-first-page.json", JSON.stringify(
+     { exported_at: new Date().toISOString(), total_bookmarks: fresh.length,
+       source: "graphql-interceptor", bookmarks: fresh }, null, 2));
+   console.log(`extracted ${all.length}, new ${fresh.length}`);
+   '
+   rm .playwright-mcp/first-page.json
+   ```
+
+Step 8 merges that batch file like any other.
 
 ### Browser Security Restrictions
 

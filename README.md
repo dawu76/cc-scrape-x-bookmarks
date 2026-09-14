@@ -33,8 +33,8 @@ Load Claude Code and point it to the `CLAUDE.md` file in this repository, which 
 ## 🎯 How It Works
 
 1. **Login**: Navigate to X bookmarks and login with your account
-2. **Inject**: Load the GraphQL interceptor script that captures real API data
-3. **Load Existing** (optional): Upload your previous bookmark file to enable incremental mode
+2. **Inject**: Install the GraphQL interceptor before the bookmarks page loads, so the newest page is captured too
+3. **Load Existing** (optional): Load the IDs from your previous collection to enable incremental mode
 4. **Extract**: Auto-scroll through your bookmarks while capturing complete data
 5. **Auto-Stop**: System stops automatically when encountering existing bookmarks
 6. **Combine**: Merge all extracted files into a single comprehensive collection
@@ -43,13 +43,13 @@ Load Claude Code and point it to the `CLAUDE.md` file in this repository, which 
 
 After setup, simply tell Claude Code to follow the instructions in `CLAUDE.md`. Claude will:
 
-1. Navigate to your X bookmarks page
+1. Navigate to your X bookmarks page (X now redirects this to History → Bookmarks)
 2. Wait for you to login
-3. Inject the GraphQL interceptor (no auto-start version)
-4. **For incremental updates**: Load your existing `data/x-bookmarks-latest.json` file
+3. Install the GraphQL interceptor and reload the bookmarks page, so the first page is captured (`bun build-interceptor-loader.ts`, see CLAUDE.md Step 3)
+4. **For incremental updates**: Load the bookmark IDs from `data/x-bookmarks-latest.json`
 5. Start auto-scroll manually
 6. System auto-stops when it encounters 5 consecutive batches of existing bookmarks
-7. Download JSON files with your bookmarks
+7. Download JSON files with your bookmarks to `.playwright-mcp/`
 
 ### 🔄 Incremental Updates (Recommended!)
 
@@ -57,7 +57,7 @@ Already extracted your bookmarks? The system can capture **only new bookmarks**.
 
 ## 📁 Output Files
 
-- `x-bookmarks-graphql-*.json` - Individual extraction files (written to the browser download directory)
+- `x-bookmarks-graphql-*.json` - Individual extraction files (downloaded to `.playwright-mcp/` in the project)
 - `data/x-bookmarks-latest.json` - Canonical collection (merged automatically by `bun combine-bookmarks.ts`)
 - `data/x-bookmarks-combined-*.json` - Full merged snapshots, one per combine run
 - `data/x-bookmarks-latest-backup-*.json` - Backups written before each update (5 newest kept)
@@ -67,7 +67,7 @@ To combine after extraction (see Step 8 in CLAUDE.md):
 # First, ensure bun is installed
 # If not installed, run: curl -fsSL https://bun.sh/install | bash
 
-BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookmarks.ts
+BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
 ```
 
 **Safety Features:**
