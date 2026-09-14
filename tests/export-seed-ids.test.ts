@@ -7,6 +7,8 @@ test("exports all IDs sorted by capturedAt descending", () => {
   const dir = mkdtempSync(join(tmpdir(), "seed-"));
   const input = join(dir, "latest.json");
   const output = join(dir, "seed-ids.json");
+  // Pass a loader path too, or the script writes to ./data/seed-loader.js.
+  const loader = join(dir, "seed-loader.js");
   writeFileSync(input, JSON.stringify({
     bookmarks: [
       { id: "old", capturedAt: "2025-01-01T00:00:00.000Z" },
@@ -16,7 +18,7 @@ test("exports all IDs sorted by capturedAt descending", () => {
     ]
   }));
 
-  const proc = Bun.spawnSync(["bun", "export-seed-ids.ts", input, output],
+  const proc = Bun.spawnSync(["bun", "export-seed-ids.ts", input, output, loader],
     { cwd: import.meta.dir + "/.." });
   expect(proc.exitCode).toBe(0);
 
