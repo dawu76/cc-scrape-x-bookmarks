@@ -69,6 +69,14 @@ Notes:
   have them. The combine step deduplicates by ID, so this is harmless.
 - **Do not navigate or reload after Step 4.** The init script builds a fresh
   interceptor on every page load, which discards the loaded seed IDs.
+- **After changing `interceptor-no-autostart.js`, close the browser
+  (`browser_close`) before running the loader.** Init scripts stay registered
+  for the life of the browser session, and the injected code skips itself when
+  `window.bookmarkInterceptor` already exists. So an older loader from earlier
+  in the session runs first and the new code never loads (seen 2026-09-15).
+  To check, evaluate
+  `window.bookmarkInterceptor.extractQuotedTweet.toString()` and look for the
+  change you made.
 - If `browser_run_code_unsafe` is unavailable, paste the contents of
   `interceptor-no-autostart.js` into `browser_evaluate`, call
   `window.bookmarkInterceptor.install()`, and then recover the first page as
@@ -200,6 +208,19 @@ Batch tweets newer than the collection's newest tweet mean the previous run is
 still further down the feed. That is expected; keep waiting.
 
 ### Step 8: Combine All Files
+
+First confirm every captured bookmark reached disk. Browser downloads can be
+dropped without any error (26 of 1,694 batches on 2026-09-15). The completion
+sentinel's count must match the unique bookmarks in the batch files:
+
+```bash
+jq -r '.new_bookmarks' "$(ls .playwright-mcp/x-bookmarks-DONE-*.json | tail -1)"
+cat .playwright-mcp/x-bookmarks-graphql-*.json | jq -s '[.[].bookmarks[].id] | unique | length'
+```
+
+If the second number is lower, recover the missing bookmarks from page memory
+before combining (Troubleshooting → "Recovering lost batch saves"). The page
+must still be open, so do this before closing or navigating the browser.
 
 ```bash
 # Downloads land in the project's .playwright-mcp/ directory (verified 2026-09-14).
@@ -455,6 +476,55 @@ already loaded (the Step 3 fallback). The first `Bookmarks` response
    ```
 
 Step 8 merges that batch file like any other.
+
+### Recovering lost batch saves
+
+The interceptor keeps every bookmark it captured in memory until the page
+closes. If Step 8's check shows fewer bookmarks on disk than the sentinel
+reports, export them all into one extra batch file. `browser_evaluate` writes
+the result itself through `filename`, so this avoids browser downloads:
+
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    const bookmarks = window.bookmarkInterceptor.getAllBookmarks();
+    return { exported_at: new Date().toISOString(), total_bookmarks: bookmarks.length,
+      source: 'graphql-interceptor-memory-dump', bookmarks };
+  }`,
+  element: "Export all captured bookmarks from page memory",
+  filename: ".playwright-mcp/x-bookmarks-graphql-memory-dump.json"
+});
+```
+
+The tool reply can exceed the response limit, because it lists every download
+event from the run. That is expected. Check the file itself:
+
+```bash
+jq '{total_bookmarks, unique: ([.bookmarks[].id] | unique | length)}' .playwright-mcp/x-bookmarks-graphql-memory-dump.json
+```
+
+Both numbers must equal the sentinel's `new_bookmarks`. Step 8 then merges the
+file like any other batch.
+
+### Playwright MCP server crashes on the first batch download
+
+With `@playwright/mcp` 0.0.81 (released 2026-09-14), the server died within a
+second of the interceptor's first batch download, three times in a row: the
+tool reply was `Connection closed`, the file never reached disk, and the
+browser reset to `about:blank`. The MCP log (under
+`~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-playwright/`) recorded
+no error. 0.0.80 ran a full 1,694-batch extraction without a crash.
+
+This project pins 0.0.80 in its local MCP config:
+
+```bash
+claude mcp remove playwright -s local
+claude mcp add playwright -s local -- npx @playwright/mcp@0.0.80
+```
+
+Then run `/mcp` to reconnect. Before reconnecting after a crash, stop any
+`playwright-mcp` process left over from this session, since it can keep the
+browser profile locked. Try `@latest` again when a newer release is out.
 
 ### Backfilling quoted tweets (full re-scrape)
 
