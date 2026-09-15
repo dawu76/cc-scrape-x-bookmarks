@@ -168,6 +168,27 @@ test("prunes latest-backups down to the newest five", () => {
   expect(backups[0] > "x-bookmarks-latest-backup-2026-01-03").toBe(true);
 });
 
+test("prunes combined snapshots down to the newest five, keeping this run's", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  for (let d = 1; d <= 7; d++) {
+    writeFileSync(join(outputDir, `x-bookmarks-combined-2026-01-0${d}T00-00-00.json`), "{}");
+  }
+  writeExport(join(inputDir, "x-bookmarks-graphql-new.json"), [bookmark("2", "2026-07-01T00:00:00.000Z")]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+
+  const snapshots = require("fs").readdirSync(outputDir)
+    .filter((f: string) => f.startsWith("x-bookmarks-combined-")).sort();
+  expect(snapshots.length).toBe(5); // 7 old + 1 new from this run = 8, pruned to 5
+  expect(snapshots[0] > "x-bookmarks-combined-2026-01-03").toBe(true);
+  // this run's snapshot (named with today's date) is the newest and survives
+  const current = JSON.parse(readFileSync(join(outputDir, snapshots[4]), "utf8"));
+  expect(current.total_bookmarks).toBe(2);
+});
+
 test("combine reports the completion sentinel reason when present", () => {
   const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
   const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));

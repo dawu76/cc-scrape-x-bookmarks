@@ -288,15 +288,18 @@ if (uniqueBookmarks.length === 0) {
       await Bun.write(latestPath, JSON.stringify(combinedData, null, 2));
       console.log(`🔗 Latest file updated at: ${latestPath}`);
 
-      // Retention: keep only the 5 newest latest-backups (ISO names sort chronologically)
-      const BACKUPS_TO_KEEP = 5;
-      const backups = readdirSync(outputDir)
-        .filter((f) => /^x-bookmarks-latest-backup-.*\.json$/.test(f))
-        .sort();
-      for (const oldBackup of backups.slice(0, Math.max(0, backups.length - BACKUPS_TO_KEEP))) {
-        unlinkSync(join(outputDir, oldBackup));
-        console.log(`🧹 Pruned old backup: ${oldBackup}`);
-      }
+      // Retention: keep only the 5 newest backups and combined snapshots. ISO
+      // names sort chronologically, so this run's files are always kept.
+      const FILES_TO_KEEP = 5;
+      const pruneOldest = (pattern: RegExp, label: string) => {
+        const matching = readdirSync(outputDir).filter((f) => pattern.test(f)).sort();
+        for (const old of matching.slice(0, Math.max(0, matching.length - FILES_TO_KEEP))) {
+          unlinkSync(join(outputDir, old));
+          console.log(`🧹 Pruned old ${label}: ${old}`);
+        }
+      };
+      pruneOldest(/^x-bookmarks-latest-backup-.*\.json$/, 'backup');
+      pruneOldest(/^x-bookmarks-combined-.*\.json$/, 'snapshot');
 
       // Opt-in: remove the raw per-batch files and the sentinel we just merged.
       // They are pure intermediates — at this point the canonical latest.json,
