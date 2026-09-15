@@ -75,6 +75,31 @@ instead of betting on one transport.
 try to parse every GraphQL response as a bookmark timeline and fail loudly
 on all the ones that aren't.
 
+## Quoted tweets
+
+`extractQuotedTweet()` reads `tweet.quoted_status_result.result`, which X
+fills with the same object shape as a top-level tweet, so the existing
+`extractTweetText()` and `parseTwitterDateTime()` helpers work on it
+unchanged. Three cases:
+
+- **Plain `Tweet`:** returns `{ id, url, username, displayName, text,
+  timestamp, media }`. `media` comes from the same `extractTweetMedia()` used
+  for top-level bookmarks, so `download-media.ts` treats both alike.
+- **`TweetWithVisibilityResults`:** X wraps tweets that carry visibility
+  notices one level deeper, so the real tweet is at `.tweet`. The same wrapper
+  shows up for top-level bookmarks in `extractBookmarkFromTimelineEntry()`.
+- **No `legacy` data** (tombstone for a deleted, protected, or withheld
+  tweet): returns `{ id, unavailable: true }` using
+  `tweet.legacy.quoted_status_id_str`, or `null` if X sent no ID.
+
+Tweets that quote nothing get `quotedTweet: null`. That keeps them distinct
+from records captured before the field existed, which have no `quotedTweet`
+key at all.
+
+The tests in `tests/interceptor-capture.test.js` build these shapes from
+`tests/fixtures.js`. They follow X's usual response, not a saved one, so
+check a live batch file before trusting a long run.
+
 ## Execution-context check
 
 `checkExecutionContext()` (line 133) runs a second after `install()` and

@@ -69,6 +69,14 @@ Notes:
   have them. The combine step deduplicates by ID, so this is harmless.
 - **Do not navigate or reload after Step 4.** The init script builds a fresh
   interceptor on every page load, which discards the loaded seed IDs.
+- **After changing `interceptor-no-autostart.js`, close the browser
+  (`browser_close`) before running the loader.** Init scripts stay registered
+  for the life of the browser session, and the injected code skips itself when
+  `window.bookmarkInterceptor` already exists. So an older loader from earlier
+  in the session runs first and the new code never loads (seen 2026-09-15).
+  To check, evaluate
+  `window.bookmarkInterceptor.extractQuotedTweet.toString()` and look for the
+  change you made.
 - If `browser_run_code_unsafe` is unavailable, paste the contents of
   `interceptor-no-autostart.js` into `browser_evaluate`, call
   `window.bookmarkInterceptor.install()`, and then recover the first page as
@@ -201,6 +209,19 @@ still further down the feed. That is expected; keep waiting.
 
 ### Step 8: Combine All Files
 
+First confirm every captured bookmark reached disk. Browser downloads can be
+dropped without any error (26 of 1,694 batches on 2026-09-15). The completion
+sentinel's count must match the unique bookmarks in the batch files:
+
+```bash
+jq -r '.new_bookmarks' "$(ls .playwright-mcp/x-bookmarks-DONE-*.json | tail -1)"
+cat .playwright-mcp/x-bookmarks-graphql-*.json | jq -s '[.[].bookmarks[].id] | unique | length'
+```
+
+If the second number is lower, recover the missing bookmarks from page memory
+before combining (Troubleshooting → "Recovering lost batch saves"). The page
+must still be open, so do this before closing or navigating the browser.
+
 ```bash
 # Downloads land in the project's .playwright-mcp/ directory (verified 2026-09-14).
 # Output always goes to ./data/.
@@ -210,6 +231,20 @@ BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-book
 The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
 automatically on every run, so no copy step is needed. The script refuses to
 shrink the collection and writes a timestamped backup before every update.
+
+When a bookmark ID appears in more than one input, `mergeBookmark` in
+`combine-bookmarks.ts` combines the copies. The canonical file is read first,
+then batch files by name (oldest to newest), so the older copy is always
+`existing`. The rules:
+- Tweet data (`metrics`, `displayName`, `isVerified`, `media`, `quotedTweet`,
+  and so on) takes the newer copy.
+- `capturedAt` keeps the earliest value, so it stays an approximate bookmark
+  date even after a full re-scrape.
+- If the newer `quotedTweet` is `{ unavailable: true }` but the older copy has
+  its text, the older copy is kept.
+
+This runs on every incremental run, not only full re-scrapes, because the
+first page is always re-captured (see Step 3).
 
 `CLEANUP_BATCH_FILES=1` deletes the raw per-batch files and the completion
 sentinel after a successful merge (they are redundant once
@@ -224,12 +259,40 @@ from Step 4 and at most the seed count plus the sentinel's `new_bookmarks`. It
 can be below the sum because the first page is counted as new before seed IDs
 load (see Step 3).
 
+Then continue to Step 9. Every run ends there.
+
+### Step 9: Download Photos
+
+```bash
+bun download-media.ts
+# 🖼️  <N> photos: <N> on disk, <N> known gone, <N> to download
+# ✅ Media: downloaded <N> (<MB> MB), failed <N>, skipped <N>
+```
+
+Saves small-size photos (`?name=small`, at most 680px on the long side) from bookmarks and their quoted
+tweets to `data/media/<media id>.<ext>`, 4 at a time. Videos and GIFs are not
+downloaded; their JSON keeps the preview image URL and the tweet link.
+
+**Run this on every run, right after Step 8.** It reads the
+`data/x-bookmarks-latest.json` that Step 8 just wrote, so running it earlier
+misses the new bookmarks. Re-runs fetch only photos not yet on disk, so after
+an incremental run it downloads just the new photos.
+Failures go to `data/media/failed.json` with the HTTP status. 403, 404 and 410
+mean the image or tweet is gone and are never retried. Anything else (5xx,
+timeouts, network errors, recorded as status 0) is retried on the next run.
+`INPUT_FILE` and `MEDIA_DIR` override the default paths.
+
+Image URLs stop working when a tweet is deleted, so the sooner a photo is
+downloaded, the more likely it is to still exist.
+
 ## 📊 What You Get
 
 - **All bookmarks** (not just 5-10 visible ones)
 - **Real engagement metrics** (likes, retweets, replies, views)
 - **Complete user data** (verification status, display names) 
 - **Media attachments** (photos, videos)
+- **Quoted tweets** (`quotedTweet`: id, author, display name, text, date, media; `null` for non-quotes)
+- **Downloaded photos** (small size, in `data/media/`; Step 9)
 - **Timestamps and URLs**
 - **Automatic deduplication**
 
@@ -414,6 +477,85 @@ already loaded (the Step 3 fallback). The first `Bookmarks` response
 
 Step 8 merges that batch file like any other.
 
+### Recovering lost batch saves
+
+The interceptor keeps every bookmark it captured in memory until the page
+closes. If Step 8's check shows fewer bookmarks on disk than the sentinel
+reports, export them all into one extra batch file. `browser_evaluate` writes
+the result itself through `filename`, so this avoids browser downloads:
+
+```javascript
+await mcp__playwright__browser_evaluate({
+  function: `() => {
+    const bookmarks = window.bookmarkInterceptor.getAllBookmarks();
+    return { exported_at: new Date().toISOString(), total_bookmarks: bookmarks.length,
+      source: 'graphql-interceptor-memory-dump', bookmarks };
+  }`,
+  element: "Export all captured bookmarks from page memory",
+  filename: ".playwright-mcp/x-bookmarks-graphql-memory-dump.json"
+});
+```
+
+The tool reply can exceed the response limit, because it lists every download
+event from the run. That is expected. Check the file itself:
+
+```bash
+jq '{total_bookmarks, unique: ([.bookmarks[].id] | unique | length)}' .playwright-mcp/x-bookmarks-graphql-memory-dump.json
+```
+
+Both numbers must equal the sentinel's `new_bookmarks`. Step 8 then merges the
+file like any other batch.
+
+### Playwright MCP server crashes on the first batch download
+
+With `@playwright/mcp` 0.0.81 (released 2026-09-14), the server died within a
+second of the interceptor's first batch download, three times in a row: the
+tool reply was `Connection closed`, the file never reached disk, and the
+browser reset to `about:blank`. The MCP log (under
+`~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-playwright/`) recorded
+no error. 0.0.80 ran a full 1,694-batch extraction without a crash.
+
+This project pins 0.0.80 in its local MCP config:
+
+```bash
+claude mcp remove playwright -s local
+claude mcp add playwright -s local -- npx @playwright/mcp@0.0.80
+```
+
+Then run `/mcp` to reconnect. Before reconnecting after a crash, stop any
+`playwright-mcp` process left over from this session, since it can keep the
+browser profile locked. Try `@latest` again when a newer release is out.
+
+### Backfilling quoted tweets (full re-scrape)
+
+`quotedTweet` was added 2026-09-14. Bookmarks captured before then have no
+`quotedTweet` field, and the raw responses are gone, so the only way to fill
+them in is to fetch every bookmark again.
+
+1. **Check the extractor against live data first.** The field names come from
+   X's usual response shape and were not verified against a saved response.
+   Do a normal incremental run (Steps 1-9 with `CLEANUP_BATCH_FILES` off) and
+   confirm quote tweets in the batch files have text:
+   ```bash
+   jq '[.bookmarks[] | select(.isQuoteTweet)] | map(.quotedTweet)' .playwright-mcp/x-bookmarks-graphql-*.json
+   ```
+   If every entry is `null` or `unavailable`, save a `Bookmarks` response
+   body (see "Recovering a missed first page") and fix `extractQuotedTweet`
+   before continuing.
+2. **Run Steps 1-3 and 5, skipping Step 4.** With no seed IDs, every bookmark
+   counts as new and auto-stop (a) never fires, so the scroll runs to the
+   bottom of the feed (~1,750 pages for ~35k bookmarks).
+3. **Combine with Step 8.** `mergeBookmark` keeps each bookmark's original
+   `capturedAt`, refreshes metrics, and fills in `quotedTweet`.
+4. **Download photos with Step 9**, which now includes quoted tweets' photos.
+
+Bookmarks you have since removed on X are not fetched again, so they keep no
+`quotedTweet` field. Count what is still missing afterwards:
+
+```bash
+jq '[.bookmarks[] | select(.isQuoteTweet and (has("quotedTweet") | not))] | length' data/x-bookmarks-latest.json
+```
+
 ### Browser Security Restrictions
 
 **Problem**: Cannot use `fetch('file://...')` to load bookmark files in browser
@@ -447,4 +589,4 @@ return `New bookmarks: ${count}, Stopped: ${stopped}`;
 
 ---
 
-**🎉 Ready to extract your entire X bookmark collection? Just copy-paste the 3 steps above!**
+**🎉 Ready to extract your entire X bookmark collection? Follow Steps 1-9 above.**

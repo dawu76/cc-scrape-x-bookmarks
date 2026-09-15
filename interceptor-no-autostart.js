@@ -314,6 +314,7 @@ class BookmarkGraphQLInterceptor {
         media: this.extractTweetMedia(tweet),
         isRetweet: !!tweet.legacy.retweeted_status_result,
         isQuoteTweet: tweet.legacy.is_quote_status || false,
+        quotedTweet: this.extractQuotedTweet(tweet),
         capturedAt: new Date().toISOString(),
         source: 'graphql-api'
       };
@@ -329,6 +330,32 @@ class BookmarkGraphQLInterceptor {
   // Extract tweet text (handle note tweets for long content)
   extractTweetText(tweet) {
     return tweet.note_tweet?.note_tweet_results?.result?.text || tweet.legacy.full_text;
+  }
+
+  // Extract the tweet this one quotes. X embeds it with the same shape as a
+  // top-level tweet. Returns null for tweets that quote nothing.
+  extractQuotedTweet(tweet) {
+    let quoted = tweet.quoted_status_result?.result;
+    if (quoted?.__typename === 'TweetWithVisibilityResults') {
+      quoted = quoted.tweet;
+    }
+
+    if (!quoted?.legacy) {
+      // Deleted, protected, or withheld: keep the ID if X still sent one
+      const id = tweet.legacy.quoted_status_id_str;
+      return id ? { id, unavailable: true } : null;
+    }
+
+    const author = quoted.core?.user_results?.result?.core;
+    return {
+      id: quoted.rest_id,
+      url: `https://x.com/${author?.screen_name}/status/${quoted.rest_id}`,
+      username: author?.screen_name,
+      displayName: author?.name,
+      text: this.extractTweetText(quoted),
+      timestamp: this.parseTwitterDateTime(quoted.legacy.created_at),
+      media: this.extractTweetMedia(quoted)
+    };
   }
 
   // Parse Twitter datetime format
