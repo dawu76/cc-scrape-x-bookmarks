@@ -10,7 +10,7 @@ If you already have `data/x-bookmarks-latest.json`, you can capture only **new**
 - Only captures NEW bookmarks you haven't saved yet
 - Automatically stops scrolling after encountering 5 consecutive batches of existing bookmarks
 - Saves time and bandwidth (seconds vs minutes)
-- No need to scroll through 22,540+ existing bookmarks
+- No need to scroll through tens of thousands of existing bookmarks
 
 ---
 
@@ -43,6 +43,9 @@ tool's sandbox cannot read files:
 bun build-interceptor-loader.ts
 # ✅ Wrote interceptor loader to ./data/interceptor-loader.js
 ```
+
+Optional arguments: `bun build-interceptor-loader.ts [interceptor] [loader]`,
+defaulting to `./interceptor-no-autostart.js` and `./data/interceptor-loader.js`.
 
 Run it from disk:
 
@@ -92,6 +95,10 @@ First, regenerate the seed file and note the count it prints:
 bun export-seed-ids.ts
 # ✅ Wrote <COUNT> seed IDs to ./data/seed-ids.json
 ```
+
+Optional arguments: `bun export-seed-ids.ts [collection] [seed ids] [seed loader]`,
+defaulting to `./data/x-bookmarks-latest.json`, `./data/seed-ids.json` and
+`./data/seed-loader.js`.
 
 #### Primary path: `browser_run_code_unsafe` (loads ALL IDs, one call)
 
@@ -195,6 +202,27 @@ To wait between checks, put the wait inside the evaluate
 at 90s or less. An MCP call that runs longer than ~120s is moved to a
 background task, and its result only arrives later as a notification.
 
+For long runs (a full extraction takes about 2 hours), watch the download
+directory from a background shell instead of polling the page. Run this with
+`run_in_background`, after clearing old sentinels (Step 8's
+`CLEANUP_BATCH_FILES=1` does that). It exits when the completion sentinel
+appears, or early if no batch file has arrived for 10 minutes, which means a
+crash or a stalled scroll:
+
+```bash
+cd .playwright-mcp
+until ls x-bookmarks-DONE-*.json >/dev/null 2>&1; do
+  newest=$(ls -t x-bookmarks-graphql-*.json 2>/dev/null | head -1)
+  if [ -n "$newest" ] && [ $(( $(date +%s) - $(stat -f %m "$newest") )) -gt 600 ]; then
+    echo "STALLED: no batch file for 10 minutes (newest: $newest)"; exit 2
+  fi
+  sleep 60
+done
+cat x-bookmarks-DONE-*.json
+```
+
+`stat -f %m` is the macOS form; on Linux use `stat -c %Y`.
+
 If every batch stays 100% new for a long time, check whether the scroll has
 simply not reached the previous run yet:
 
@@ -224,7 +252,7 @@ must still be open, so do this before closing or navigating the browser.
 
 ```bash
 # Downloads land in the project's .playwright-mcp/ directory (verified 2026-09-14).
-# Output always goes to ./data/.
+# Output goes to ./data/ (set OUTPUT_DIR to change it).
 BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
 ```
 
@@ -254,10 +282,12 @@ snapshots, or backups. Leaving it on keeps a stale sentinel from being
 re-reported on the next run. Drop it only if you want to inspect the batch
 files first.
 
-**Verification:** "Final unique bookmarks" must be at least the seed count
-from Step 4 and at most the seed count plus the sentinel's `new_bookmarks`. It
-can be below the sum because the first page is counted as new before seed IDs
-load (see Step 3).
+**Verification:** "Final unique bookmarks" must be at least the collection's
+size before this run, and at most that size plus the sentinel's
+`new_bookmarks`. This holds for incremental and full runs alike. It is usually
+below the sum: in incremental runs the first page is counted as new before seed
+IDs load (see Step 3), and in full runs nearly every bookmark is already in the
+collection.
 
 Then continue to Step 9. Every run ends there.
 
@@ -344,12 +374,18 @@ See Step 8 above — `BOOKMARK_FILES_DIR="/path/to/downloads" bun combine-bookma
 // Check progress
 window.bookmarkInterceptor.getBookmarkCount()
 
-// Stop auto-scroll
-window.bookmarkInterceptor.uninstall()
+// Stop auto-scroll after the current scroll. The sentinel will still say
+// "All recent bookmarks already exist in your collection.", since this reuses
+// the incremental stop flag.
+window.bookmarkInterceptor.shouldStopScrolling = true
 
-// Force save current data
+// Save any captured bookmarks not yet written to a batch file
 window.bookmarkInterceptor.saveBookmarks()
 ```
+
+`uninstall()` does **not** stop auto-scroll. It removes the network hooks, so
+scrolling continues without capturing anything until the watchdog stops it and
+writes a "Capture stall detected." sentinel.
 
 ## 📂 Finding Your Downloaded Files
 
@@ -389,6 +425,9 @@ cat "$BOOKMARK_FILES_DIR"/x-bookmarks-DONE-*.json 2>/dev/null | tail -1
 
 - `"reason": "All recent bookmarks already exist in your collection."` → clean incremental stop.
 - `"reason": "Reached bottom of page."` → clean full stop.
+- `"reason": "Maximum scroll limit reached."` → stopped after 10,000 scrolls
+  without reaching the bottom. The batch files are valid, but the feed was not
+  fully read; start a run with `startAutoScroll({ maxScrolls: 20000 })`.
 - `"reason": "Capture stall detected."` → the interceptor was likely broken; investigate before trusting the batch.
 - **No sentinel file at all** → the run did not finish; re-run before combining.
 
@@ -396,7 +435,7 @@ cat "$BOOKMARK_FILES_DIR"/x-bookmarks-DONE-*.json 2>/dev/null | tail -1
 
 - **Individual files**: `x-bookmarks-graphql-*.json` (real-time saves, in the browser download directory). Each file holds only the **new** bookmarks from that one batch (~20), not a cumulative snapshot — a full run is tens of MB total, not hundreds. The combine step deduplicates by ID, so overlapping or old cumulative files are harmless.
 - **Canonical collection**: `data/x-bookmarks-latest.json` (merged by Step 8)
-- **Combined outputs**: `data/x-bookmarks-combined-*.json` (full merged snapshots, one per run)
+- **Combined outputs**: `data/x-bookmarks-combined-*.json` (full merged snapshots, one per run; 5 newest kept automatically)
 - **Backups**: `data/x-bookmarks-latest-backup-*.json` (written before every update; 5 newest kept automatically)
 
 **Perfect for**: Backing up bookmarks, data analysis, building personal tools, archiving collections.
@@ -421,6 +460,19 @@ This will:
 - Filter by year, engagement metrics, or media
 
 Press `Ctrl+C` to stop the server when done.
+
+## 🧪 Tests
+
+```bash
+bun test
+```
+
+Covers the interceptor (extraction, quoted tweets, auto-stop, batch saving,
+sentinel, auto-scroll watchdog), `export-seed-ids.ts`, `combine-bookmarks.ts`
+(merging, backups, retention, cleanup) and `download-media.ts` (against a local
+test server, never X). `build-interceptor-loader.ts` and the viewer have no
+tests. Run it after changing any script, then rebuild the loader (Step 3)
+before the next browser run.
 
 ---
 
@@ -532,8 +584,8 @@ browser profile locked. Try `@latest` again when a newer release is out.
 `quotedTweet` field, and the raw responses are gone, so the only way to fill
 them in is to fetch every bookmark again.
 
-1. **Check the extractor against live data first.** The field names come from
-   X's usual response shape and were not verified against a saved response.
+1. **Check the extractor against live data first.** The field names were
+   confirmed against X's live responses on 2026-09-15, but X can change them.
    Do a normal incremental run (Steps 1-9 with `CLEANUP_BATCH_FILES` off) and
    confirm quote tweets in the batch files have text:
    ```bash

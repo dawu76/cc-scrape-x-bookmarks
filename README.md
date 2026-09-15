@@ -23,8 +23,12 @@ cd cc-scrape-x-bookmarks
 ### Step 2: Add the Playwright MCP Server
 
 ```bash
-claude mcp add playwright npx @playwright/mcp@latest
+claude mcp add playwright -s local -- npx @playwright/mcp@0.0.80
 ```
+
+Pinned to 0.0.80 because 0.0.81 crashes on the first bookmark file download.
+See CLAUDE.md Troubleshooting → "Playwright MCP server crashes on the first
+batch download" before switching to `@latest`.
 
 ### Step 3: Open Claude Code and Point to Instructions
 
@@ -62,7 +66,7 @@ Already extracted your bookmarks? The system can capture **only new bookmarks**.
 
 - `x-bookmarks-graphql-*.json` - Individual extraction files (downloaded to `.playwright-mcp/` in the project)
 - `data/x-bookmarks-latest.json` - Canonical collection (merged automatically by `bun combine-bookmarks.ts`)
-- `data/x-bookmarks-combined-*.json` - Full merged snapshots, one per combine run
+- `data/x-bookmarks-combined-*.json` - Full merged snapshots, one per combine run (5 newest kept)
 - `data/x-bookmarks-latest-backup-*.json` - Backups written before each update (5 newest kept)
 - `data/media/<media id>.<ext>` - Small-size photos (up to 680px) from bookmarks and quoted tweets (`bun download-media.ts`, Step 9 in CLAUDE.md)
 
@@ -113,11 +117,17 @@ curl -fsSL https://bun.sh/install | bash
 exec $SHELL  # Restart shell to load bun
 ```
 
-### File upload errors during incremental mode
-Claude Code automatically uses a direct injection approach that avoids file upload dialog issues. If you see context destruction errors, ensure you're using the latest version of `CLAUDE.md`.
+### Playwright tools disconnect ("Connection closed")
+See CLAUDE.md Troubleshooting → "Playwright MCP server crashes on the first batch download". Run `/mcp` to reconnect.
 
-### Large file/response errors
-These are handled automatically by Claude Code using file system checks instead of browser console reads. No action needed.
+### Fewer bookmarks on disk than the run captured
+Browser downloads can be dropped silently. CLAUDE.md Step 8 has the check, and Troubleshooting → "Recovering lost batch saves" recovers them from page memory.
+
+## 🧪 Running Tests
+
+```bash
+bun test
+```
 
 ## 🙏 Credits
 

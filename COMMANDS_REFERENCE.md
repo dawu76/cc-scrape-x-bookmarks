@@ -50,14 +50,14 @@ jq '[.bookmarks[] | select(.isQuoteTweet)] | group_by(if .quotedTweet.text then 
 ### Starting a Local Web Server
 
 ```bash
-# Start Python HTTP server on port 8000
-python3 -m http.server 8000
+# Preferred: starts a server on port 8080 and opens the viewer
+./view-bookmarks.sh
 
-# Alternative: Start on a different port
-python3 -m http.server 3000
+# Manual equivalent, from the project root (so data/ is reachable)
+python3 -m http.server 8080
 
 # Access the viewer at:
-# http://localhost:8000/bookmark-viewer.html
+# http://localhost:8080/bookmark-viewer.html
 ```
 
 **To stop the server:** Press `Ctrl+C`
@@ -65,11 +65,11 @@ python3 -m http.server 3000
 ### Checking if Port is Already in Use
 
 ```bash
-# Check what's running on port 8000
-lsof -i :8000
+# Check what's running on port 8080
+lsof -i :8080
 
-# Kill a process using port 8000
-lsof -ti :8000 | xargs kill
+# Kill a process using port 8080
+lsof -ti :8080 | xargs kill
 ```
 
 ## Git Workflow for Forking
@@ -167,25 +167,26 @@ gh pr create --title "Add financial analysis features" --body "Description of ch
 
 ### Removing Large Files
 
-```bash
-# Remove all downloaded bookmark files
-rm .playwright-mcp/x-bookmarks-graphql-*.json
+Batch and sentinel files are deleted automatically when you combine with
+`CLEANUP_BATCH_FILES=1` (CLAUDE.md Step 8). Old backups and combined snapshots
+are pruned to the newest 5 on every combine. To remove leftover batch files by
+hand, only after they have been combined:
 
-# ⚠️ NEVER delete data/x-bookmarks-latest.json — it is the canonical and only
-# copy of the collection. It is already git-ignored; there is nothing to clean.
+```bash
+find .playwright-mcp -maxdepth 1 -type f \( -name 'x-bookmarks-graphql-*.json' -o -name 'x-bookmarks-DONE-*.json' \) -delete
+
+# ⚠️ NEVER delete data/x-bookmarks-latest.json. It is the canonical copy of the
+# collection (the 5 newest backups in data/ are the only other copies).
 ```
 
 ### Checking .gitignore
 
 ```bash
-# View current .gitignore
 cat .gitignore
-
-# Add files to .gitignore
-echo "data/x-bookmarks-latest.json" >> .gitignore
-echo "*.json" >> .gitignore
-echo "node_modules/" >> .gitignore
 ```
+
+`data/` (collection, backups, snapshots, photos) and `.playwright-mcp/` (batch
+files, logs) are already ignored. No other entries are needed.
 
 ## Useful Aliases (Optional)
 
@@ -206,7 +207,7 @@ alias proj='cd /path/to/cc-scrape-x-bookmarks'
 alias json='jq .'
 
 # Start web server in current directory
-alias serve='python3 -m http.server 8000'
+alias serve='python3 -m http.server 8080'
 ```
 
 ## Tips & Tricks
@@ -232,8 +233,9 @@ find .playwright-mcp -name "*.json" -size +10M
 ### Compress Old Bookmark Files
 
 ```bash
-# Compress all but the latest file
-ls -t .playwright-mcp/x-bookmarks-graphql-*.json | tail -n +2 | xargs tar -czf bookmarks-archive.tar.gz
+# Archive a run's batch files before combining with CLEANUP_BATCH_FILES=1
+# (each file holds only its own batch, so keep all of them together)
+tar -czf bookmarks-archive-$(date +%Y%m%d).tar.gz .playwright-mcp/x-bookmarks-*.json
 
 # Extract compressed archive
 tar -xzf bookmarks-archive.tar.gz
@@ -254,8 +256,8 @@ chmod +x script.sh
 ### Port Already in Use
 
 ```bash
-# Find process using port 8000
-lsof -i :8000
+# Find process using port 8080 (the viewer's port)
+lsof -i :8080
 
 # Kill the process (replace PID)
 kill -9 PID
