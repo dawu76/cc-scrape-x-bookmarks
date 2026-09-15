@@ -50,6 +50,66 @@ test("combines into OUTPUT_DIR and merges the canonical latest.json", () => {
   expect(latest.bookmarks[0].id).toBe("2"); // newest tweet first
 });
 
+test("newer batch copies of a bookmark are merged over the canonical and older batches", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2026-01-01T00:00:00.000Z")]);
+  const older = { ...bookmark("1", "2026-01-01T00:00:00.000Z"), text: "older batch" };
+  const newer = {
+    ...bookmark("1", "2026-01-01T00:00:00.000Z"),
+    isQuoteTweet: true,
+    quotedTweet: { id: "0", username: "q", text: "quoted" }
+  };
+  // written newest first so a readdir-order read would pick the wrong one
+  writeExport(join(inputDir, "x-bookmarks-graphql-2026-09-02T00-00-00.json"), [newer]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-2026-09-01T00-00-00.json"), [older]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+
+  const latest = JSON.parse(readFileSync(join(outputDir, "x-bookmarks-latest.json"), "utf8"));
+  expect(latest.total_bookmarks).toBe(1);
+  expect(latest.bookmarks[0].quotedTweet.text).toBe("quoted");
+});
+
+test("merge keeps the earliest capturedAt and takes newer metrics", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+
+  writeExport(join(outputDir, "x-bookmarks-latest.json"), [bookmark("1", "2024-03-01T00:00:00.000Z")]);
+  const refreshed = {
+    ...bookmark("1", "2024-03-01T00:00:00.000Z"),
+    capturedAt: "2026-09-14T00:00:00.000Z",
+    metrics: { replies: 5, retweets: 5, likes: 500, bookmarks: 5, views: 5000 }
+  };
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"), [refreshed]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+
+  const [b] = JSON.parse(readFileSync(join(outputDir, "x-bookmarks-latest.json"), "utf8")).bookmarks;
+  expect(b.capturedAt).toBe("2024-03-01T00:00:00.000Z");
+  expect(b.metrics.likes).toBe(500);
+});
+
+test("merge keeps captured quote text when the newer copy says unavailable", () => {
+  const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));
+
+  const captured = { id: "0", username: "q", text: "quoted" };
+  writeExport(join(outputDir, "x-bookmarks-latest.json"),
+    [{ ...bookmark("1", "2026-01-01T00:00:00.000Z"), isQuoteTweet: true, quotedTweet: captured }]);
+  writeExport(join(inputDir, "x-bookmarks-graphql-a.json"),
+    [{ ...bookmark("1", "2026-01-01T00:00:00.000Z"), isQuoteTweet: true, quotedTweet: { id: "0", unavailable: true } }]);
+
+  const { code } = runCombine({ BOOKMARK_FILES_DIR: inputDir, OUTPUT_DIR: outputDir });
+  expect(code).toBe(0);
+
+  const [b] = JSON.parse(readFileSync(join(outputDir, "x-bookmarks-latest.json"), "utf8")).bookmarks;
+  expect(b.quotedTweet).toEqual(captured);
+});
+
 test("canonical latest.json is always merged as input, so history never shrinks", () => {
   const inputDir = mkdtempSync(join(tmpdir(), "bm-in-"));
   const outputDir = mkdtempSync(join(tmpdir(), "bm-out-"));

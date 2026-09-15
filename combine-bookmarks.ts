@@ -2,7 +2,7 @@
 
 // Script to combine all GraphQL bookmark files into a single comprehensive file
 import { mkdirSync, readdirSync, unlinkSync } from 'fs';
-import { join, resolve } from 'path';
+import { basename, join, resolve } from 'path';
 
 // Check if running with bun
 if (typeof Bun === 'undefined') {
@@ -42,8 +42,35 @@ interface Bookmark {
   media: any[];
   isRetweet: boolean;
   isQuoteTweet: boolean;
+  quotedTweet?: {
+    id: string;
+    url?: string;
+    username?: string;
+    text?: string;
+    timestamp?: string;
+    unavailable?: boolean;
+  } | null;
   capturedAt: string;
   source: string;
+}
+
+// Decides what to keep when the same bookmark ID appears in more than one input.
+// Inputs are read canonical collection first, then other files by name (oldest
+// batch to newest), so `existing` is always the older copy and `incoming` the newer.
+// Tweet data (metrics, names, media, quotedTweet) takes the newer copy, with two exceptions.
+function mergeBookmark(existing: Bookmark, incoming: Bookmark): Bookmark {
+  // capturedAt is the closest thing to a bookmark date, so keep the earliest.
+  // ISO strings sort chronologically.
+  const capturedAt = [existing.capturedAt, incoming.capturedAt].filter(Boolean).sort()[0];
+
+  // A quoted tweet deleted after capture comes back unavailable; keep the text we saved.
+  const keepQuote = incoming.quotedTweet?.unavailable && existing.quotedTweet?.text;
+
+  return {
+    ...incoming,
+    capturedAt,
+    quotedTweet: keepQuote ? existing.quotedTweet : incoming.quotedTweet
+  };
 }
 
 interface CombinedData {
@@ -128,15 +155,19 @@ if (sentinels.length === 0) {
   }
 }
 
-// Always merge the canonical collection so incremental runs never drop history
+// Always merge the canonical collection so incremental runs never drop history.
+// It goes first so mergeBookmark sees it as the older copy.
 const canonicalLatest = resolve(outputDir, 'x-bookmarks-latest.json');
-const resolvedFiles = files.map(f => resolve(f));
-if (await Bun.file(canonicalLatest).exists() && !resolvedFiles.includes(canonicalLatest)) {
-  files.push(canonicalLatest);
+const orderedFiles = files
+  .map(f => resolve(f))
+  .filter(f => f !== canonicalLatest)
+  .sort((a, b) => basename(a).localeCompare(basename(b)));
+if (await Bun.file(canonicalLatest).exists()) {
+  orderedFiles.unshift(canonicalLatest);
 }
 
 // Safety check: Exit early if no files found
-if (files.length === 0) {
+if (orderedFiles.length === 0) {
   console.log('❌ No bookmark files found. Exiting without creating empty files to preserve existing data.');
   console.log(`💡 Searched in: ${downloadsDir}`);
   console.log(`💡 Use BOOKMARK_FILES_DIR environment variable to specify a different directory.`);
@@ -149,7 +180,7 @@ let totalProcessed = 0;
 let totalDuplicates = 0;
 
 // Process each file
-for (const filePath of files) {
+for (const filePath of orderedFiles) {
   try {
     console.log(`📖 Processing: ${filePath.split('/').pop()}`);
     
@@ -160,8 +191,10 @@ for (const filePath of files) {
     if (data.bookmarks && Array.isArray(data.bookmarks)) {
       for (const bookmark of data.bookmarks) {
         if (bookmark.id) {
-          if (allBookmarks.has(bookmark.id)) {
+          const existing = allBookmarks.get(bookmark.id);
+          if (existing) {
             totalDuplicates++;
+            allBookmarks.set(bookmark.id, mergeBookmark(existing, bookmark));
           } else {
             allBookmarks.set(bookmark.id, bookmark);
           }
@@ -188,7 +221,7 @@ const combinedData: CombinedData = {
   total_bookmarks: uniqueBookmarks.length,
   total_processed: totalProcessed,
   total_duplicates: totalDuplicates,
-  files_processed: files.length,
+  files_processed: orderedFiles.length,
   source: 'combined-graphql-interceptor',
   version: '1.0',
   bookmarks: uniqueBookmarks
@@ -208,7 +241,7 @@ await Bun.write(outputPath, JSON.stringify(combinedData, null, 2));
 
 console.log('\n🎉 Bookmark combination completed!');
 console.log(`📊 Statistics:`);
-console.log(`   • Files processed: ${files.length}`);
+console.log(`   • Files processed: ${orderedFiles.length}`);
 console.log(`   • Total bookmarks processed: ${totalProcessed}`);
 console.log(`   • Duplicate bookmarks removed: ${totalDuplicates}`);
 console.log(`   • Final unique bookmarks: ${uniqueBookmarks.length}`);

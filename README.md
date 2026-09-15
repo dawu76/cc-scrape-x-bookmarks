@@ -76,6 +76,7 @@ BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-book
 - ✅ Early exit if no files found (won't create empty files)
 - ✅ Timestamped backups saved in `data/` (keeps 5 newest)
 - ✅ Automatically includes existing `data/x-bookmarks-latest.json` in merge for seamless incremental updates
+- ✅ Duplicate bookmarks are merged field by field: newer metrics and quoted tweets win, the earliest `capturedAt` is kept, and captured quote text survives if the quoted tweet is later deleted (see Step 8 in CLAUDE.md)
 
 ## 📊 Viewing Your Bookmarks
 

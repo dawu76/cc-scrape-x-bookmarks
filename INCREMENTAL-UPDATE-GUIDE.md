@@ -14,4 +14,7 @@ Quick orientation:
   page bottom, or when the capture-stall watchdog fires.
 - **Merging** (Step 8): `bun combine-bookmarks.ts` — canonical data is
   `data/x-bookmarks-latest.json`; the script refuses to shrink it and keeps
-  the 5 newest backups.
+  the 5 newest backups. Bookmarks seen more than once are merged by
+  `mergeBookmark` (newer tweet data, earliest `capturedAt`).
+- **Quoted tweet backfill**: a one-time full re-scrape. See Troubleshooting →
+  "Backfilling quoted tweets" in CLAUDE.md.

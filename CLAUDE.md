@@ -211,6 +211,20 @@ The canonical collection lives at `data/x-bookmarks-latest.json` and is merged
 automatically on every run, so no copy step is needed. The script refuses to
 shrink the collection and writes a timestamped backup before every update.
 
+When a bookmark ID appears in more than one input, `mergeBookmark` in
+`combine-bookmarks.ts` combines the copies. The canonical file is read first,
+then batch files by name (oldest to newest), so the older copy is always
+`existing`. The rules:
+- Tweet data (`metrics`, `displayName`, `isVerified`, `media`, `quotedTweet`,
+  and so on) takes the newer copy.
+- `capturedAt` keeps the earliest value, so it stays an approximate bookmark
+  date even after a full re-scrape.
+- If the newer `quotedTweet` is `{ unavailable: true }` but the older copy has
+  its text, the older copy is kept.
+
+This runs on every incremental run, not only full re-scrapes, because the
+first page is always re-captured (see Step 3).
+
 `CLEANUP_BATCH_FILES=1` deletes the raw per-batch files and the completion
 sentinel after a successful merge (they are redundant once
 `x-bookmarks-latest.json` is updated). It only runs after a successful,
@@ -230,6 +244,7 @@ load (see Step 3).
 - **Real engagement metrics** (likes, retweets, replies, views)
 - **Complete user data** (verification status, display names) 
 - **Media attachments** (photos, videos)
+- **Quoted tweets** (`quotedTweet`: id, author, text, date; `null` for non-quotes)
 - **Timestamps and URLs**
 - **Automatic deduplication**
 
@@ -413,6 +428,35 @@ already loaded (the Step 3 fallback). The first `Bookmarks` response
    ```
 
 Step 8 merges that batch file like any other.
+
+### Backfilling quoted tweets (full re-scrape)
+
+`quotedTweet` was added 2026-09-14. Bookmarks captured before then have no
+`quotedTweet` field, and the raw responses are gone, so the only way to fill
+them in is to fetch every bookmark again.
+
+1. **Check the extractor against live data first.** The field names come from
+   X's usual response shape and were not verified against a saved response.
+   Do a normal incremental run (Steps 1-8 with `CLEANUP_BATCH_FILES` off) and
+   confirm quote tweets in the batch files have text:
+   ```bash
+   jq '[.bookmarks[] | select(.isQuoteTweet)] | map(.quotedTweet)' .playwright-mcp/x-bookmarks-graphql-*.json
+   ```
+   If every entry is `null` or `unavailable`, save a `Bookmarks` response
+   body (see "Recovering a missed first page") and fix `extractQuotedTweet`
+   before continuing.
+2. **Run Steps 1-3 and 5, skipping Step 4.** With no seed IDs, every bookmark
+   counts as new and auto-stop (a) never fires, so the scroll runs to the
+   bottom of the feed (~1,750 pages for ~35k bookmarks).
+3. **Combine with Step 8.** `mergeBookmark` keeps each bookmark's original
+   `capturedAt`, refreshes metrics, and fills in `quotedTweet`.
+
+Bookmarks you have since removed on X are not fetched again, so they keep no
+`quotedTweet` field. Count what is still missing afterwards:
+
+```bash
+jq '[.bookmarks[] | select(.isQuoteTweet and (has("quotedTweet") | not))] | length' data/x-bookmarks-latest.json
+```
 
 ### Browser Security Restrictions
 

@@ -37,6 +37,12 @@ jq '[.bookmarks[] | select(.media | length > 0)] | length' data/x-bookmarks-late
 
 # Get date range of bookmarks
 jq '[.bookmarks[].timestamp] | min, max' data/x-bookmarks-latest.json
+
+# Quote tweets with the quoted tweet's author and text
+jq '.bookmarks[] | select(.quotedTweet.text) | {username, text: .text[:100], quoted: "\(.quotedTweet.username): \(.quotedTweet.text[:100])"}' data/x-bookmarks-latest.json
+
+# Quote tweets by status: captured, unavailable (deleted/protected), or not yet backfilled
+jq '[.bookmarks[] | select(.isQuoteTweet)] | group_by(if .quotedTweet.text then "captured" elif .quotedTweet.unavailable then "unavailable" else "missing" end) | map({status: (if .[0].quotedTweet.text then "captured" elif .[0].quotedTweet.unavailable then "unavailable" else "missing" end), count: length})' data/x-bookmarks-latest.json
 ```
 
 ## Setting Up the Bookmark Viewer
