@@ -68,7 +68,7 @@ instead of betting on one transport.
 
 ## The endpoint filter
 
-`isBookmarkRequest()` (line 129) uses a narrow regex:
+`isBookmarkRequest()` (line 127) uses a narrow regex:
 `/\/graphql\/.+\/Bookmarks/`. X's GraphQL surface has dozens of endpoints
 (timeline, likes, follows, search, etc.) all hitting
 `/graphql/<hash>/<OperationName>`. Without this filter the interceptor would
