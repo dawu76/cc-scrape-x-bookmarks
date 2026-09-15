@@ -346,13 +346,15 @@ class BookmarkGraphQLInterceptor {
       return id ? { id, unavailable: true } : null;
     }
 
-    const username = quoted.core?.user_results?.result?.core?.screen_name;
+    const author = quoted.core?.user_results?.result?.core;
     return {
       id: quoted.rest_id,
-      url: `https://x.com/${username}/status/${quoted.rest_id}`,
-      username,
+      url: `https://x.com/${author?.screen_name}/status/${quoted.rest_id}`,
+      username: author?.screen_name,
+      displayName: author?.name,
       text: this.extractTweetText(quoted),
-      timestamp: this.parseTwitterDateTime(quoted.legacy.created_at)
+      timestamp: this.parseTwitterDateTime(quoted.legacy.created_at),
+      media: this.extractTweetMedia(quoted)
     };
   }
 

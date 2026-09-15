@@ -58,9 +58,36 @@ test("quote tweets carry the quoted tweet's id, author, text, and date", () => {
     id: "30",
     url: "https://x.com/quoted_author/status/30",
     username: "quoted_author",
+    displayName: "Trader",
     text: "tweet 30",
-    timestamp: "2023-09-28T11:07:25.000Z"
+    timestamp: "2023-09-28T11:07:25.000Z",
+    media: []
   });
+});
+
+test("quoted tweets carry their media", () => {
+  const { res, tweet } = responseWithTweet("71");
+  const quoted = makeTweetResult("70");
+  quoted.legacy.extended_entities = {
+    media: [{
+      id_str: "700",
+      type: "photo",
+      media_url_https: "https://pbs.twimg.com/media/chart.jpg",
+      expanded_url: "https://x.com/trader/status/70/photo/1",
+      ext_alt_text: "a chart"
+    }]
+  };
+  tweet.legacy.is_quote_status = true;
+  tweet.quoted_status_result = { result: quoted };
+
+  const [b] = new BookmarkGraphQLInterceptor().extractBookmarksFromResponse(res);
+  expect(b.quotedTweet.media).toEqual([{
+    id: "700",
+    type: "photo",
+    url: "https://pbs.twimg.com/media/chart.jpg",
+    expanded_url: "https://x.com/trader/status/70/photo/1",
+    alt_text: "a chart"
+  }]);
 });
 
 test("quoted tweets wrapped in TweetWithVisibilityResults are unwrapped", () => {

@@ -46,8 +46,10 @@ interface Bookmark {
     id: string;
     url?: string;
     username?: string;
+    displayName?: string;
     text?: string;
     timestamp?: string;
+    media?: any[];
     unavailable?: boolean;
   } | null;
   capturedAt: string;

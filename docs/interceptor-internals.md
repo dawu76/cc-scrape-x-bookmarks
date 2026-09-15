@@ -82,7 +82,9 @@ fills with the same object shape as a top-level tweet, so the existing
 `extractTweetText()` and `parseTwitterDateTime()` helpers work on it
 unchanged. Three cases:
 
-- **Plain `Tweet`:** returns `{ id, url, username, text, timestamp }`.
+- **Plain `Tweet`:** returns `{ id, url, username, displayName, text,
+  timestamp, media }`. `media` comes from the same `extractTweetMedia()` used
+  for top-level bookmarks, so `download-media.ts` treats both alike.
 - **`TweetWithVisibilityResults`:** X wraps tweets that carry visibility
   notices one level deeper, so the real tweet is at `.tweet`. The same wrapper
   shows up for top-level bookmarks in `extractBookmarkFromTimelineEntry()`.

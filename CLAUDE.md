@@ -238,13 +238,40 @@ from Step 4 and at most the seed count plus the sentinel's `new_bookmarks`. It
 can be below the sum because the first page is counted as new before seed IDs
 load (see Step 3).
 
+Then continue to Step 9. Every run ends there.
+
+### Step 9: Download Photos
+
+```bash
+bun download-media.ts
+# 🖼️  <N> photos: <N> on disk, <N> known gone, <N> to download
+# ✅ Media: downloaded <N> (<MB> MB), failed <N>, skipped <N>
+```
+
+Saves small-size photos (`?name=small`, at most 680px on the long side) from bookmarks and their quoted
+tweets to `data/media/<media id>.<ext>`, 4 at a time. Videos and GIFs are not
+downloaded; their JSON keeps the preview image URL and the tweet link.
+
+**Run this on every run, right after Step 8.** It reads the
+`data/x-bookmarks-latest.json` that Step 8 just wrote, so running it earlier
+misses the new bookmarks. Re-runs fetch only photos not yet on disk, so after
+an incremental run it downloads just the new photos.
+Failures go to `data/media/failed.json` with the HTTP status. 403, 404 and 410
+mean the image or tweet is gone and are never retried. Anything else (5xx,
+timeouts, network errors, recorded as status 0) is retried on the next run.
+`INPUT_FILE` and `MEDIA_DIR` override the default paths.
+
+Image URLs stop working when a tweet is deleted, so the sooner a photo is
+downloaded, the more likely it is to still exist.
+
 ## 📊 What You Get
 
 - **All bookmarks** (not just 5-10 visible ones)
 - **Real engagement metrics** (likes, retweets, replies, views)
 - **Complete user data** (verification status, display names) 
 - **Media attachments** (photos, videos)
-- **Quoted tweets** (`quotedTweet`: id, author, text, date; `null` for non-quotes)
+- **Quoted tweets** (`quotedTweet`: id, author, display name, text, date, media; `null` for non-quotes)
+- **Downloaded photos** (small size, in `data/media/`; Step 9)
 - **Timestamps and URLs**
 - **Automatic deduplication**
 
@@ -437,7 +464,7 @@ them in is to fetch every bookmark again.
 
 1. **Check the extractor against live data first.** The field names come from
    X's usual response shape and were not verified against a saved response.
-   Do a normal incremental run (Steps 1-8 with `CLEANUP_BATCH_FILES` off) and
+   Do a normal incremental run (Steps 1-9 with `CLEANUP_BATCH_FILES` off) and
    confirm quote tweets in the batch files have text:
    ```bash
    jq '[.bookmarks[] | select(.isQuoteTweet)] | map(.quotedTweet)' .playwright-mcp/x-bookmarks-graphql-*.json
@@ -450,6 +477,7 @@ them in is to fetch every bookmark again.
    bottom of the feed (~1,750 pages for ~35k bookmarks).
 3. **Combine with Step 8.** `mergeBookmark` keeps each bookmark's original
    `capturedAt`, refreshes metrics, and fills in `quotedTweet`.
+4. **Download photos with Step 9**, which now includes quoted tweets' photos.
 
 Bookmarks you have since removed on X are not fetched again, so they keep no
 `quotedTweet` field. Count what is still missing afterwards:
@@ -491,4 +519,4 @@ return `New bookmarks: ${count}, Stopped: ${stopped}`;
 
 ---
 
-**🎉 Ready to extract your entire X bookmark collection? Just copy-paste the 3 steps above!**
+**🎉 Ready to extract your entire X bookmark collection? Follow Steps 1-9 above.**

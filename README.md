@@ -38,6 +38,7 @@ Load Claude Code and point it to the `CLAUDE.md` file in this repository, which 
 4. **Extract**: Auto-scroll through your bookmarks while capturing complete data
 5. **Auto-Stop**: System stops automatically when encountering existing bookmarks
 6. **Combine**: Merge all extracted files into a single comprehensive collection
+7. **Download Photos**: Save small-size copies of photos from your bookmarks and their quoted tweets
 
 ## 🔧 Usage
 
@@ -50,10 +51,12 @@ After setup, simply tell Claude Code to follow the instructions in `CLAUDE.md`. 
 5. Start auto-scroll manually
 6. System auto-stops when it encounters 5 consecutive batches of existing bookmarks
 7. Download JSON files with your bookmarks to `.playwright-mcp/`
+8. Combine them into `data/x-bookmarks-latest.json` (CLAUDE.md Step 8)
+9. Download photos to `data/media/` (CLAUDE.md Step 9, every run)
 
 ### 🔄 Incremental Updates (Recommended!)
 
-Already extracted your bookmarks? The system can capture **only new bookmarks**. See [CLAUDE.md](CLAUDE.md) Steps 1–8 for the complete workflow, and [INCREMENTAL-UPDATE-GUIDE.md](INCREMENTAL-UPDATE-GUIDE.md) for a quick orientation.
+Already extracted your bookmarks? The system can capture **only new bookmarks**. See [CLAUDE.md](CLAUDE.md) Steps 1–9 for the complete workflow, and [INCREMENTAL-UPDATE-GUIDE.md](INCREMENTAL-UPDATE-GUIDE.md) for a quick orientation.
 
 ## 📁 Output Files
 
@@ -61,13 +64,15 @@ Already extracted your bookmarks? The system can capture **only new bookmarks**.
 - `data/x-bookmarks-latest.json` - Canonical collection (merged automatically by `bun combine-bookmarks.ts`)
 - `data/x-bookmarks-combined-*.json` - Full merged snapshots, one per combine run
 - `data/x-bookmarks-latest-backup-*.json` - Backups written before each update (5 newest kept)
+- `data/media/<media id>.<ext>` - Small-size photos (up to 680px) from bookmarks and quoted tweets (`bun download-media.ts`, Step 9 in CLAUDE.md)
 
-To combine after extraction (see Step 8 in CLAUDE.md):
+After every extraction, combine and then download photos (Steps 8 and 9 in CLAUDE.md):
 ```bash
 # First, ensure bun is installed
 # If not installed, run: curl -fsSL https://bun.sh/install | bash
 
 BOOKMARK_FILES_DIR="$PWD/.playwright-mcp" CLEANUP_BATCH_FILES=1 bun combine-bookmarks.ts
+bun download-media.ts
 ```
 
 **Safety Features:**

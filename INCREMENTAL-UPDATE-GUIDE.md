@@ -1,7 +1,7 @@
 # Incremental Update Guide
 
 The executable, always-current workflow lives in [CLAUDE.md](CLAUDE.md) —
-follow Steps 1–8 there. This file intentionally contains no copies of the
+follow Steps 1–9 there. This file intentionally contains no copies of the
 commands, because duplicated instructions drift (a stale copy of the scroll
 loop in this repo once masked a syntax error for months).
 
@@ -16,5 +16,7 @@ Quick orientation:
   `data/x-bookmarks-latest.json`; the script refuses to shrink it and keeps
   the 5 newest backups. Bookmarks seen more than once are merged by
   `mergeBookmark` (newer tweet data, earliest `capturedAt`).
+- **Photos** (Step 9, every run, after merging): `bun download-media.ts`
+  fetches only photos not yet in `data/media/`.
 - **Quoted tweet backfill**: a one-time full re-scrape. See Troubleshooting →
   "Backfilling quoted tweets" in CLAUDE.md.
